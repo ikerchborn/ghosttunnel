@@ -164,6 +164,9 @@ _MODE_COLORS = {
     "error":       ("ERROR",            "#f85149"),
 }
 
+# Allowlist of subcommands the GUI is allowed to invoke (injection prevention)
+ALLOWED_SUBCOMMANDS = frozenset({"panic", "panic-disable", "unlock-network"})
+
 
 # ------------------------------------------------------------------
 # IPC worker thread — queries daemon socket without blocking GUI
@@ -406,13 +409,11 @@ class MainWindow(QMainWindow):
         "/usr/local/bin/ghostctl",
         "/usr/bin/ghostctl",
     )
-    # Allowlist of subcommands the GUI is allowed to invoke (injection prevention)
-    _ALLOWED_SUBCOMMANDS = frozenset({"panic", "panic-disable", "unlock-network"})
 
     def _run_privileged(self, subcommand: str) -> bool:
         """Run 'ghostctl <subcommand>' via pkexec for privilege escalation."""
         # SEC-GUI-01: Validate subcommand against allowlist before use
-        if subcommand not in self._ALLOWED_SUBCOMMANDS:
+        if subcommand not in ALLOWED_SUBCOMMANDS:
             self._log(f"✗ Internal error: unknown subcommand {subcommand!r}")
             return False
 

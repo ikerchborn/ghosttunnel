@@ -94,6 +94,72 @@ sudo ghostctl unlock-network
 
 *(Alternatively, in the event of a critical Python failure, a standalone bash script is available: `sudo ghost-recover`)*
 
+## 🖥️ Desktop GUI Usage
+
+GhostTunnel includes a fully-featured Qt6 desktop graphical interface for users who prefer visual monitoring and control.
+
+### How to Launch the GUI
+You can start the GUI from your desktop environment's application menu (if configured), or by running the following command in your terminal:
+```bash
+ghosttunnel-gui
+```
+*(Note: You do not need `sudo` to run the GUI. The GUI securely communicates with the root daemon via the IPC socket. Privileged actions like triggering PANIC will prompt you for your password via `pkexec`).*
+
+### GUI Features & Capabilities
+- **Live Status Dashboard:** Real-time visual feedback on your VPN status, current mode (e.g., `VPN ACTIVE`, `PANIC`, `VPN CONFLICT`), active firewall rules, and detected DNS servers.
+- **One-Click Controls:** Dedicated buttons to trigger PANIC mode, disable PANIC, or execute an emergency network unlock.
+- **Dynamic Configuration:** Easily toggle advanced security settings (like blocking IPv6, enabling Stealth Mode, or allowing LAN traffic) via checkboxes. Configurations are saved directly to `/etc/ghosttunnel/config.json`.
+- **Activity Log:** A built-in terminal-like panel showing timestamped events, errors, and daemon responses.
+
+---
+
+## 🌍 Supported VPN Providers & Compatibility
+
+GhostTunnel is built with a highly modular and extensible VPN detection system, making it compatible with almost any VPN provider.
+
+### Built-in Support
+Out of the box, GhostTunnel auto-detects and seamlessly integrates with:
+1. **WireGuard (`wg0`, `wg1`, etc.):** The recommended protocol for modern, high-speed, secure tunnels.
+2. **OpenVPN (`tun0`, `tun1`, etc.):** The industry standard protocol.
+3. **ProtonVPN (`pvpn-kill`, `pvpn-ipv6rot`, etc.):** Full compatibility with ProtonVPN's official Linux CLI and GUI apps.
+
+### How to Use With Other (Custom) VPNs
+If you use a custom VPN provider or non-standard network interfaces, GhostTunnel can easily be configured to protect them.
+
+1. Open the configuration file (or use the GUI to edit settings):
+   ```bash
+   sudo nano /etc/ghosttunnel/config.json
+   ```
+2. Locate the `vpn_hints` array. This tells GhostTunnel which interface prefixes it should consider "secure tunnels".
+   ```json
+   "vpn_hints": ["wg", "tun", "pvpn", "customvpn"]
+   ```
+3. Add your custom VPN's interface prefix to the list. For example, if your VPN creates an interface called `mullvad0`, add `"mullvad"`.
+4. Restart the daemon: `sudo systemctl restart ghosttunnel`.
+GhostTunnel will now automatically detect your custom VPN interface, establish the Kill Switch around it, and monitor it for failures.
+
+---
+
+## 🎯 Common Use Cases & Scenarios
+
+GhostTunnel is designed for individuals who require absolute assurance of their network privacy.
+
+### 1. The Coffee Shop Worker (Public Wi-Fi Protection)
+**Scenario:** You connect to an untrusted public Wi-Fi network and launch your VPN. Suddenly, the Wi-Fi router reboots or drops your connection for 3 seconds.
+**GhostTunnel Action:** Normally, your laptop would try to reconnect and immediately leak your background apps' data (emails, chat clients) in plain text over the public network. GhostTunnel's `network-pre.target` rules ensure that without the VPN tunnel active, **0 bytes** of data leave your machine. Your traffic remains securely blocked until the VPN reconnects.
+
+### 2. The Privacy Researcher (Anti-DNS Leak & Anti-Tracking)
+**Scenario:** Your OS silently accepts malicious DNS servers pushed by a compromised local router (DHCP Injection) to track your web history.
+**GhostTunnel Action:** GhostTunnel forces all DNS queries to be resolved exclusively through your VPN tunnel. Local DNS overrides are explicitly ignored unless you manually opt-in via the `trust_local_dns` setting.
+
+### 3. The Torrent / P2P User (ISP Monitoring Prevention)
+**Scenario:** You are downloading large files. Your OpenVPN daemon crashes unexpectedly due to a memory error.
+**GhostTunnel Action:** As soon as the `tun0` interface vanishes, GhostTunnel's atomic `nftables` immediately drop all P2P traffic. Your real ISP never sees a single packet belonging to the P2P swarm.
+
+### 4. The OPSEC Professional (Physical Security / Panic)
+**Scenario:** You detect physical tampering, a malicious actor on the network, or you need to instantly sever all digital ties to your device.
+**GhostTunnel Action:** By clicking "TRIGGER PANIC" in the GUI or running `sudo ghostctl panic`, the kernel firewall is instantly replaced with a "Drop All" policy. Even if the VPN is perfectly healthy, your machine goes completely dark and offline.
+
 ---
 
 ## 🔒 "Fail-Closed" Architecture

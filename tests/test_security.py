@@ -209,7 +209,7 @@ class TestGuiSubcommandAllowlist:
         with mock.patch.dict("sys.modules", qt_modules):
             import ghosttunnel.gui.main as gui_mod
             importlib.reload(gui_mod)
-            allowed = gui_mod.MainWindow._ALLOWED_SUBCOMMANDS
+            allowed = gui_mod.ALLOWED_SUBCOMMANDS
             assert "panic" in allowed
             assert "panic-disable" in allowed
             assert "unlock-network" in allowed
