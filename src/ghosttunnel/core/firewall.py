@@ -139,7 +139,8 @@ table inet {table} {{
             if not self.settings.ipv6_block:
                 lines.append(
                     "    ip6 nexthdr icmpv6 icmpv6 type { destination-unreachable, "
-                    "packet-too-big, time-exceeded, parameter-problem, echo-reply } accept"
+                    "packet-too-big, time-exceeded, parameter-problem, echo-reply, "
+                    "nd-router-solicit, nd-router-advert, nd-neighbor-solicit, nd-neighbor-advert } accept"
                 )
 
         if self.settings.allow_lan:
@@ -167,6 +168,12 @@ table inet {table} {{
         lines.append('    oifname "lo" accept')
         lines.append("    ct state established,related accept")
         lines.append("    ct state invalid drop")
+        
+        if not self.settings.ipv6_block:
+            lines.append(
+                "    ip6 nexthdr icmpv6 icmpv6 type { nd-router-solicit, nd-router-advert, "
+                "nd-neighbor-solicit, nd-neighbor-advert } accept"
+            )
 
         for iface in physical:
             safe = sanitize_iface(iface)

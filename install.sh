@@ -34,6 +34,7 @@ python3 -m venv "${VENV_DIR}"
 # 3. Install static panic rules for ExecStartPre (CRIT-01)
 echo "[*] Installing static FAIL CLOSED boot rules..."
 mkdir -p /etc/ghosttunnel
+chmod 700 /etc/ghosttunnel
 cp etc/ghosttunnel/panic.rules /etc/ghosttunnel/panic.rules
 chmod 600 /etc/ghosttunnel/panic.rules
 
