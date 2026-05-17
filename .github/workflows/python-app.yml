@@ -62,8 +62,7 @@ jobs:
           --severity-level high \
           --confidence-level medium \
           --format txt \
-          --exclude src/ghosttunnel/gui \
-          -ll
+          --exclude src/ghosttunnel/gui
 
     # ---------------------------------------------------------------
     # Unit tests (pytest) — no root or Linux required
