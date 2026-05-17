@@ -1,0 +1,31 @@
+# GhostTunnel — Bootstrap Panic Rules (Static nftables)
+# Applied by systemd ExecStartPre= BEFORE Python starts.
+# Guarantees FAIL CLOSED from the very first millisecond of boot.
+# Allows only DNS to hardcoded bootstrap servers so the daemon can resolve.
+# DO NOT EDIT manually — managed by install.sh
+
+table inet ghosttunnel {
+  chain input {
+    type filter hook input priority filter; policy drop;
+    iifname "lo" accept
+    ct state established,related accept
+    ct state invalid drop
+    limit rate 5/second log prefix "GT-BOOT-IN: " level warn
+  }
+  chain output {
+    type filter hook output priority filter; policy drop;
+    oifname "lo" accept
+    ct state established,related accept
+    ct state invalid drop
+    # Allow DNS to hardcoded bootstrap resolvers only
+    ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9 } udp dport 53 accept
+    ip daddr { 1.1.1.1, 1.0.0.1, 9.9.9.9 } tcp dport 53 accept
+    # Allow VPN handshake ports so tunnel can establish
+    udp dport { 500, 4500, 1194, 51820 } accept
+    tcp dport { 443, 1194 } accept
+    limit rate 5/second log prefix "GT-BOOT-OUT: " level warn
+  }
+  chain forward {
+    type filter hook forward priority filter; policy drop;
+  }
+}

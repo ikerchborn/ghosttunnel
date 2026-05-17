@@ -1,0 +1,110 @@
+name: GhostTunnel CI
+
+on:
+  push:
+    branches: [ "main", "master" ]
+  pull_request:
+    branches: [ "main", "master" ]
+
+permissions:
+  contents: read
+
+jobs:
+  audit:
+    name: Security & Quality Audit
+    runs-on: ubuntu-latest
+
+    steps:
+    - name: Checkout repository
+      uses: actions/checkout@v4
+
+    - name: Set up Python 3.12
+      uses: actions/setup-python@v5
+      with:
+        python-version: "3.12"
+
+    - name: Install build tools and project
+      run: |
+        python -m pip install --upgrade pip
+        pip install hatchling
+        pip install -e ".[dev]"
+
+    # ---------------------------------------------------------------
+    # Syntax & undefined-name check (hard errors only)
+    # ---------------------------------------------------------------
+    - name: Lint — syntax errors and undefined names
+      run: |
+        flake8 src/ \
+          --count \
+          --select=E9,F63,F7,F82 \
+          --show-source \
+          --statistics
+
+    # ---------------------------------------------------------------
+    # Style & complexity (warnings, non-blocking)
+    # ---------------------------------------------------------------
+    - name: Lint — style and complexity
+      run: |
+        flake8 src/ \
+          --count \
+          --exit-zero \
+          --max-complexity=12 \
+          --max-line-length=120 \
+          --statistics
+
+    # ---------------------------------------------------------------
+    # Security static analysis (bandit)
+    # Fails on HIGH severity issues only; medium issues are reported.
+    # ---------------------------------------------------------------
+    - name: Security scan — bandit
+      run: |
+        bandit -r src/ \
+          --severity-level high \
+          --confidence-level medium \
+          --format txt \
+          --exclude src/ghosttunnel/gui \
+          -ll
+
+    # ---------------------------------------------------------------
+    # Unit tests (pytest) — no root or Linux required
+    # ---------------------------------------------------------------
+    - name: Run security unit tests
+      run: |
+        pytest tests/ -v --tb=short
+
+    # ---------------------------------------------------------------
+    # Validate that all modules import cleanly (catches broken imports)
+    # ---------------------------------------------------------------
+    - name: Import sanity check
+      run: |
+        python -c "
+        import sys
+        mods = [
+            'ghosttunnel.core.config',
+            'ghosttunnel.core.models',
+            'ghosttunnel.core.system',
+            'ghosttunnel.core.emergency',
+            'ghosttunnel.core.dns_protection',
+            'ghosttunnel.core.ipc',
+            'ghosttunnel.core.logger',
+            'ghosttunnel.core.leak_detector',
+            'ghosttunnel.core.vpn_monitor',
+            'ghosttunnel.core.vpn_rotator',
+            'ghosttunnel.vpn',
+            'ghosttunnel.cli.main',
+        ]
+        for m in mods:
+            __import__(m)
+            print(f'  [OK] {m}')
+        print('All imports succeeded.')
+        "
+
+    # ---------------------------------------------------------------
+    # Validate panic.rules is valid nftables syntax (dry-run)
+    # ---------------------------------------------------------------
+    - name: Validate nftables panic.rules syntax
+      run: |
+        sudo apt-get install -y nftables -qq
+        sudo nft --check -f etc/ghosttunnel/panic.rules
+        echo "[OK] panic.rules syntax is valid."
+

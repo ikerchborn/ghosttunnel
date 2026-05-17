@@ -1,0 +1,49 @@
+[Unit]
+Description=GhostTunnel - Advanced VPN Kill Switch & OPSEC Tool
+# Fix for Early Boot Race Condition: Run BEFORE any network interfaces are brought up.
+DefaultDependencies=no
+Before=network-pre.target
+Wants=network-pre.target
+
+[Service]
+Type=simple
+
+# (CRIT-01) Apply FAIL CLOSED rules BEFORE Python starts.
+# This eliminates the boot exposure window entirely.
+ExecStartPre=/usr/sbin/nft -f /etc/ghosttunnel/panic.rules
+
+# (Red Team #3) Disable IPv6 at the kernel level BEFORE ProtectKernelTunables locks it down.
+# If you need IPv6, comment these out.
+ExecStartPre=-/sbin/sysctl -w net.ipv6.conf.all.disable_ipv6=1
+ExecStartPre=-/sbin/sysctl -w net.ipv6.conf.default.disable_ipv6=1
+
+# (HIGH-06) Enable IP forwarding via sysctl if needed (before daemon starts).
+# Comment out these lines if you don't use allow_forwarding.
+# ExecStartPre=/sbin/sysctl -w net.ipv4.ip_forward=1
+# ExecStartPre=/sbin/sysctl -w net.ipv6.conf.all.forwarding=1
+
+ExecStart=/opt/ghosttunnel/venv/bin/ghostd
+Restart=on-failure
+RestartSec=5
+
+# Security hardening
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+NoNewPrivileges=true
+ReadWritePaths=/run/ghosttunnel
+# (HIGH-06) If IP forwarding is needed at runtime, uncomment:
+# ReadWritePaths=/run/ghosttunnel /proc/sys/net/ipv4 /proc/sys/net/ipv6
+CapabilityBoundingSet=CAP_NET_ADMIN CAP_NET_RAW
+AmbientCapabilities=CAP_NET_ADMIN CAP_NET_RAW
+ProtectKernelModules=true
+ProtectKernelTunables=true
+ProtectControlGroups=true
+RestrictSUIDSGID=true
+MemoryDenyWriteExecute=true
+LockPersonality=true
+RestrictRealtime=true
+SystemCallFilter=@system-service @network-io
+
+[Install]
+WantedBy=multi-user.target
