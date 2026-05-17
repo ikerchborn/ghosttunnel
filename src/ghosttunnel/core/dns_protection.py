@@ -24,8 +24,12 @@ def get_dns_servers(settings: Settings) -> Tuple[Tuple[str, ...], Tuple[str, ...
     servers_v6: list[str] = []
 
     if settings.trust_local_dns:
-        resolv = Path("/etc/resolv.conf")
-        if resolv.exists():
+        paths_to_check = [Path("/etc/resolv.conf"), Path("/run/systemd/resolve/resolv.conf")]
+        for resolv in paths_to_check:
+            if not resolv.exists():
+                continue
+            
+            found_external = False
             for raw in resolv.read_text(encoding="utf-8", errors="ignore").splitlines():
                 line = raw.strip()
                 if line.startswith("nameserver "):
@@ -37,10 +41,15 @@ def get_dns_servers(settings: Settings) -> Tuple[Tuple[str, ...], Tuple[str, ...
                         # Validate IP before trusting it (CRIT-02)
                         if not _is_valid_ip(value):
                             continue
+                        found_external = True
                         if ":" in value:
                             servers_v6.append(value)
                         else:
                             servers_v4.append(value)
+            
+            # If we found real external DNS servers, stop checking other files
+            if found_external:
+                break
 
     merged_v4 = tuple(dict.fromkeys([*settings.bootstrap_dns, *servers_v4]))
     merged_v6 = tuple(dict.fromkeys([*settings.bootstrap_dns_v6, *servers_v6]))

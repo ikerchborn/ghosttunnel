@@ -43,6 +43,10 @@ class ProtonVpnAdapter(VpnAdapter):
         iface_name = None
 
         for name, info in snapshot.interfaces.items():
+            # Ignore ProtonVPN dummy kill switch interfaces
+            if name in (_PROTON_KS_IFACE, "ipv6leakintrf0"):
+                continue
+
             is_proton = any(
                 name.startswith(p) for p in _PROTON_WG_PREFIXES + _PROTON_CLI_PREFIXES
             )
@@ -61,32 +65,13 @@ class ProtonVpnAdapter(VpnAdapter):
         native_ks_active = _PROTON_KS_IFACE in snapshot.interfaces
 
         if native_ks_active:
-            # BUG-FIX-5: Return conflict with the VPN still marked as active
-            # so the daemon applies PANIC rules (FAIL CLOSED) instead of
-            # an empty ruleset that leaves the system unprotected.
-            logger.warning(
-                "ProtonVPN native kill switch interface (%s) detected. "
-                "GhostTunnel is entering FAIL CLOSED mode to avoid leaving "
-                "the system unprotected. Disable ProtonVPN's Kill Switch in "
-                "Settings → Connection → Kill Switch to let GhostTunnel take over.",
-                _PROTON_KS_IFACE,
-            )
-            return VpnState(
-                active=active,
-                iface=iface_name,
-                provider=self.name,
-                conflict=True,
-                conflict_reason=(
-                    "ProtonVPN native Kill Switch is active (pvpnksintrf0 detected). "
-                    "GhostTunnel has entered FAIL CLOSED mode. "
-                    "To resolve: disable Kill Switch in ProtonVPN Settings → Connection."
-                ),
-            )
+            logger.info("ProtonVPN native kill switch interface (%s) detected. Coexisting.", _PROTON_KS_IFACE)
 
         return VpnState(
             active=active,
             iface=iface_name,
             provider=self.name,
+            proton_native_killswitch=native_ks_active,
         )
 
     def reconnect(self) -> bool:

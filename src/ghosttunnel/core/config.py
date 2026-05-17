@@ -85,7 +85,7 @@ class Settings:
     bootstrap_dns_v6: list[str] = field(default_factory=lambda: list(BOOTSTRAP_DNS_V6))
     udp_handshake_ports: list[int] = field(default_factory=lambda: list(UDP_HANDSHAKE_PORTS))
     tcp_handshake_ports: list[int] = field(default_factory=lambda: list(TCP_HANDSHAKE_PORTS))
-    custom_vpn_endpoints: list[str] = field(default_factory=list)
+    custom_vpn_endpoints: list[str] = field(default_factory=lambda: ["api.protonvpn.ch", "api.protonmail.ch"])
 
     @classmethod
     def load(cls, path: str = DEFAULT_CONFIG_PATH) -> "Settings":
