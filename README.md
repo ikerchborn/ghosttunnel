@@ -1,6 +1,6 @@
 <div align="center">
   <h1>🛡️ GhostTunnel</h1>
-  <p><strong>Military-Grade VPN Kill Switch & OPSEC Infrastructure for Linux</strong></p>
+  <p><strong>VPN Kill Switch & OPSEC Infrastructure for Linux</strong></p>
 
   [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
@@ -123,20 +123,75 @@ Out of the box, GhostTunnel auto-detects and seamlessly integrates with:
 2. **OpenVPN (`tun0`, `tun1`, etc.):** The industry standard protocol.
 3. **ProtonVPN (`pvpn-kill`, `pvpn-ipv6rot`, etc.):** Full compatibility with ProtonVPN's official Linux CLI and GUI apps.
 
-### How to Use With Other (Custom) VPNs
-If you use a custom VPN provider or non-standard network interfaces, GhostTunnel can easily be configured to protect them.
+### Integrating Custom or Third-Party VPNs
 
-1. Open the configuration file (or use the GUI to edit settings):
+GhostTunnel's agnostic network detection engine is designed to adapt to practically any VPN provider or custom tunneling solution (e.g., Mullvad, IVPN, Tailscale, custom IPSec setups, or proprietary corporate endpoints). Instead of hardcoding support for specific commercial clients, GhostTunnel intelligently monitors system network interfaces matching specific string prefixes.
+
+To secure a custom VPN, follow this comprehensive professional integration procedure:
+
+#### Phase 1: Identify Your VPN Interface Prefix
+Before configuring GhostTunnel, you must determine the exact virtual network interface name your VPN client generates when an active encrypted connection is established.
+
+1. Connect to your custom VPN normally.
+2. Open your terminal and list all active network interfaces using the standard `ip` command:
+   ```bash
+   ip link show
+   ```
+3. Identify the interface corresponding to your VPN tunnel. Common proprietary naming conventions include:
+   - `mullvadX` (Mullvad VPN)
+   - `tailscaleX` (Tailscale)
+   - `ipsecX` (IPSec tunnels)
+   - `cscotunX` (Cisco AnyConnect)
+4. Note the **prefix** of the interface. For instance, if the interface is named `mullvad0`, the prefix to whitelist is `"mullvad"`. If the interface is `tailscale0`, the prefix is `"tailscale"`.
+
+#### Phase 2: Configure GhostTunnel Core Engine
+Once the prefix is identified, you must instruct the GhostTunnel daemon to recognize and protect it. This can be done via the GUI settings or directly through the central JSON configuration file.
+
+**Method A: Via Command Line (Standard for Servers/Headless environments)**
+1. Open the primary configuration file using a root-privileged text editor:
    ```bash
    sudo nano /etc/ghosttunnel/config.json
    ```
-2. Locate the `vpn_hints` array. This tells GhostTunnel which interface prefixes it should consider "secure tunnels".
+2. Locate the `"vpn_hints"` array. This array dictates the exact interface prefixes the daemon strictly categorizes as secure tunnels:
    ```json
-   "vpn_hints": ["wg", "tun", "pvpn", "customvpn"]
+   "vpn_hints": [
+       "wg",
+       "tun",
+       "pvpn"
+   ]
    ```
-3. Add your custom VPN's interface prefix to the list. For example, if your VPN creates an interface called `mullvad0`, add `"mullvad"`.
-4. Restart the daemon: `sudo systemctl restart ghosttunnel`.
-GhostTunnel will now automatically detect your custom VPN interface, establish the Kill Switch around it, and monitor it for failures.
+3. Append your newly identified prefix to this array. Using the Mullvad example:
+   ```json
+   "vpn_hints": [
+       "wg",
+       "tun",
+       "pvpn",
+       "mullvad"
+   ]
+   ```
+4. Save the configuration file and trigger a state reload by restarting the GhostTunnel daemon:
+   ```bash
+   sudo systemctl restart ghosttunnel
+   ```
+
+**Method B: Via Desktop GUI**
+1. Launch the GhostTunnel Desktop Application (`ghosttunnel-gui`).
+2. Navigate to the **Advanced Configuration** panel.
+3. Locate the input field managing **"VPN Hints"** or **"Custom VPN Interfaces"**.
+4. Append your prefix (e.g., `mullvad`) to the list.
+5. Click **Apply Changes**. The GUI will securely commit the new state to `/etc/ghosttunnel/config.json` and signal the background root daemon via the IPC socket to reload the firewall matrix dynamically.
+
+#### Phase 3: Architectural Verification & Leak Testing
+After applying the configuration, it is critical to verify that the fail-closed architecture has successfully enveloped your custom VPN.
+
+1. Ensure your custom VPN is actively connected.
+2. Query the GhostTunnel core engine status:
+   ```bash
+   sudo ghostctl status
+   ```
+3. Verify the telemetry output. The daemon should explicitly list your custom interface (e.g., `mullvad0`) under the active interfaces section and confirm that the global state is `[VPN ACTIVE]`.
+4. **Conduct a Live Leak Test:** Forcefully terminate your VPN client abruptly (e.g., via `killall` or simulating a crash). Immediately attempt to ping an external IP (e.g., `ping 1.1.1.1`).
+5. **Expected Result:** The ICMP requests **must fail instantly** (e.g., `Network is unreachable`). This proves the atomic `nftables` have successfully locked down the network routing and prevented any unencrypted data leakage.
 
 ---
 
