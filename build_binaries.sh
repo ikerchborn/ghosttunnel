@@ -45,7 +45,7 @@ pyinstaller --clean --onefile \
 echo "[*] Compiling 'ghostgui' (GUI)..."
 pyinstaller --clean --onefile \
     --name ghostgui \
-    --windowed \
+    --collect-all PyQt6 \
     --distpath "$DIST_DIR" \
     --workpath "build/ghostgui" \
     --specpath "build/spec" \

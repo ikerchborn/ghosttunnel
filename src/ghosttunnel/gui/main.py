@@ -395,7 +395,6 @@ class MainWindow(QMainWindow):
         btn_save.setObjectName("SaveBtn")
         btn_save.clicked.connect(self._save_config)
         cfg_grid.addWidget(btn_save, 3, 0, 1, 2)
-        cfg_grid.addWidget(btn_save, 3, 0, 1, 2)
 
         # BUG-GUI-09: Disable config saving if not root, to avoid showing default values and confusing user
         if os.geteuid() != 0:
@@ -410,7 +409,6 @@ class MainWindow(QMainWindow):
         self.log = QPlainTextEdit()
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
-        log_layout.addWidget(self.log)
         log_layout.addWidget(self.log)
         
         # Assemble Layout

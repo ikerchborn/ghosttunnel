@@ -78,7 +78,7 @@ Once started, `ghostd` will automatically apply the boot-time lockdown rules on 
 
 ## 🖥️ Graphical User Interface (GUI)
 
-GhostTunnel includes a fully-featured Qt6 desktop application for visual telemetry and control.
+GhostTunnel includes a fully-featured Qt6 desktop application for visual telemetry and control, styled with a premium "Matrix hacker" aesthetic (neon green on pure black) and an optimized layout with controls prioritized at the top.
 
 ### How to Access the GUI
 1. **From your Desktop Menu (Recommended):**
@@ -166,7 +166,7 @@ GhostTunnel features an agnostic network detection engine. It does not rely on f
 ### Out-of-the-Box Support
 1. **WireGuard (`wg0`, `mullvad0`, `nordlynx`):** Native detection for standard WireGuard implementations.
 2. **OpenVPN (`tun0`, `tap0`):** Full compatibility with legacy OpenVPN setups.
-3. **ProtonVPN (`pvpn-`, `proton0`):** Deep integration with both the official ProtonVPN CLI and the modern GUI, natively resolving internal kill switch conflicts.
+3. **ProtonVPN (`pvpn-`, `proton0`):** Deep integration with both the official ProtonVPN CLI and the modern GUI. To prevent silent firewall rule collisions, GhostTunnel explicitly detects Proton's native kill switch (`pvpnksintrf0`) and enters a fail-closed `conflict` state, alerting the user to disable Proton's native kill switch to proceed safely.
 
 ### Integrating Custom VPN Providers
 
