@@ -1,11 +1,11 @@
 <div align="center">
   <h1>🛡️ GhostTunnel</h1>
-  <p><strong>VPN Kill Switch & OPSEC Infrastructure for Linux</strong></p>
+  <p><strong>Military-Grade VPN Kill Switch & OPSEC Infrastructure for Linux</strong></p>
 
   [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Security Policy](https://img.shields.io/badge/Security-Policy-red.svg)](./SECURITY.md)
-  [![Security: Atomic](https://img.shields.io/badge/Security-Atomic_Nftables-red.svg)](#fail-closed-architecture)
+  [![Architecture: V1.0](https://img.shields.io/badge/Architecture-Native_V1.0-brightgreen.svg)](#)
 </div>
 
 ---
@@ -30,14 +30,21 @@ Most commercial VPN clients use reactive, application-level kill switches. They 
 - **Strict "FAIL-CLOSED" Philosophy:** If the daemon crashes, if a bug occurs, or if your VPN provider is experiencing conflicts, the system defaults to blocking all traffic. **Privacy over Connectivity, always.**
 - **Secure IPC Socket:** User interaction is handled via a root-authenticated Unix Domain Socket (`SO_PEERCRED`), preventing malicious local processes from tampering with your security state.
 
+### 🌟 Architecture v1.0.0 (Native Build)
+GhostTunnel has been completely overhauled to resolve all common Linux deployment constraints:
+- **Zero-Dependency Native Binaries:** GhostTunnel can now be compiled into pure Linux executables. No more messy Python virtual environments or `pip` conflicts.
+- **Universal Sudo Path Resolution:** Binaries are safely installed natively in `/usr/bin/`, completely eliminating the notorious `sudo: command not found` errors caused by restrictive `secure_path` settings in Parrot OS and Kali Linux.
+- **Rootless GUI Experience:** The graphical interface integrates directly into your Desktop Menu. It launches without requiring `root` and securely escalates privileges on-the-fly via `pkexec` only when you execute a critical action.
+- **Fail-Safe Installation:** The installation script gracefully configures the daemon without instantly locking your network, allowing you to manually trigger your first-time lockdown when you are actually ready.
+
 ---
 
 ## 🛠️ Installation & Deployment
 
-GhostTunnel is built exclusively for modern, `systemd`-driven **Debian-based distributions**. It requires root privileges for installation, service deployment, and kernel-level firewall management.
+GhostTunnel requires root privileges for installation, service deployment, and kernel-level firewall management.
 
-### 1. Compile Native Binaries (Optional but Recommended)
-You can compile GhostTunnel into standalone Linux executables (`.exe` equivalents) for maximum performance and professional integration, avoiding reliance on Python virtual environments.
+### 1. Compile Native Binaries (Highly Recommended)
+Compiling GhostTunnel into standalone Linux executables (`.exe` equivalents) provides maximum performance and bypasses the need for Python virtual environments.
 
 ```bash
 # Clone the repository
@@ -48,10 +55,10 @@ cd ghosttunnel
 chmod +x build_binaries.sh
 ./build_binaries.sh
 ```
-This will create native binaries in the `dist_bin/` folder.
+This generates the native executables inside the `dist_bin/` folder.
 
-### 2. Automated Installation
-We provide a secure installation script that safely manages dependencies and configures the `systemd` daemon. If you ran the compilation step above, it will automatically install the native binaries and the Desktop App shortcut.
+### 2. Run the Installer
+The installation script will automatically detect if you compiled the native binaries and install them instantly. If you skipped step 1, it will fallback to safely creating an isolated Python virtual environment instead.
 
 ```bash
 chmod +x install.sh
@@ -59,9 +66,9 @@ sudo ./install.sh
 ```
 
 ### 3. First-Time Activation (IMPORTANT)
-**GhostTunnel DOES NOT start automatically upon installation.** This ensures that you do not get unexpectedly locked out of your network while configuring your VPN.
+**GhostTunnel DOES NOT start automatically upon installation.** This ensures that you do not get unexpectedly locked out of your network while configuring your VPN for the first time.
 
-To activate the FAIL-CLOSED killswitch and lock down your network for the first time, you must manually start the daemon:
+To activate the FAIL-CLOSED killswitch and lock down your network, you must manually start the daemon:
 ```bash
 sudo systemctl start ghosttunnel
 ```
@@ -69,9 +76,34 @@ Once started, `ghostd` will automatically apply the boot-time lockdown rules on 
 
 ---
 
+## 🖥️ Graphical User Interface (GUI)
+
+GhostTunnel includes a fully-featured Qt6 desktop application for visual telemetry and control.
+
+### How to Access the GUI
+1. **From your Desktop Menu (Recommended):**
+   Open your system's application launcher (Activities, Whisker Menu, KDE Menu, etc.), search for **"GhostTunnel"**, and click the shield icon.
+2. **From the Terminal:**
+   You can also launch it directly by typing:
+   ```bash
+   ghostgui
+   # or
+   ghosttunnel-gui
+   ```
+
+*Note: You do not need to run the GUI as root initially. If you attempt a privileged action (like saving the config or triggering a panic), the GUI will automatically prompt you for your password via `pkexec`.*
+
+### GUI Capabilities
+- **Live Status Dashboard:** Visual feedback on your VPN status, panic state, active firewall rules, and routed physical interfaces.
+- **One-Click Controls:** Dedicated buttons to trigger PANIC, Disable PANIC, or Emergency Unlock.
+- **Activity Log:** Real-time stream of daemon events and status changes.
+- **Dynamic Configuration:** Toggle advanced features directly from the UI without touching the configuration files.
+
+---
+
 ## 💻 CLI Manual (`ghostctl`)
 
-GhostTunnel runs silently via `systemd`. However, the `ghostctl` Command Line Interface provides real-time control over the daemon via the secure IPC socket.
+While the GUI is convenient, GhostTunnel can be fully operated via the `ghostctl` Command Line Interface.
 
 ### Real-Time Telemetry
 Check the active VPN provider, interface, current firewall mode, and DNS status:
@@ -91,13 +123,6 @@ Disable panic mode and instruct the daemon to safely re-evaluate the network sta
 sudo ghostctl panic-disable
 ```
 
-### Daemon Management
-Restart or start the daemon gracefully:
-```bash
-sudo ghostctl restart
-sudo ghostctl start
-```
-
 ### Emergency Network Unlock
 If you need to completely remove all GhostTunnel defenses (e.g., to diagnose a broken network interface without an active tunnel), this will stop the daemon and flush the `nftables` rules.
 > **Warning:** Your real IP will be exposed to your ISP.
@@ -114,34 +139,9 @@ sudo ghostctl logs
 
 ---
 
-## 🖥️ Graphical User Interface (GUI)
-
-GhostTunnel includes a fully-featured Qt6 desktop application for visual telemetry and control.
-
-### How to Access the GUI
-1. **From your Desktop Menu (Recommended):**
-   Open your system's application launcher (Activities, Whisker Menu, etc.), search for **"GhostTunnel"**, and click the icon.
-2. **From the Terminal:**
-   You can also launch it directly by typing:
-   ```bash
-   ghostgui
-   # or
-   ghosttunnel-gui
-   ```
-
-*Note: You do not need to run the GUI as root initially. If you attempt a privileged action (like saving the config or triggering a panic), the GUI will automatically prompt you for your password via `pkexec`.*
-
-### GUI Capabilities
-- **Live Status Dashboard:** Visual feedback on your VPN status, panic state, active firewall rules, and routed physical interfaces.
-- **One-Click Controls:** Dedicated buttons to trigger PANIC, Disable PANIC, or Emergency Unlock. (Requires `pkexec` authorization).
-- **Activity Log:** Real-time stream of daemon events and status changes.
-- **Dynamic Configuration:** Toggle advanced features directly from the UI without touching the configuration files.
-
----
-
 ## ⚙️ Advanced Configuration (`config.json`)
 
-GhostTunnel's behavior can be customized via the GUI or by editing `/etc/ghosttunnel/config.json`. The daemon will read these changes upon restart.
+GhostTunnel's behavior can be customized via the GUI or by editing `/etc/ghosttunnel/config.json`. 
 
 ### Core OPSEC Settings
 - **`kill_switch`**: (Default: `true`) Master toggle for the fail-closed architecture.

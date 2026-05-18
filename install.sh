@@ -32,15 +32,20 @@ apt-get install -y \
   python3-pyqt6 \
   --no-install-recommends
 
-# 2. Create dedicated isolated virtualenv (HIGH-05)
+# 2. Setup Runtime Environment (VENV or Native)
 VENV_DIR="/opt/ghosttunnel/venv"
-echo "[*] Creating Python virtualenv at ${VENV_DIR}..."
-mkdir -p /opt/ghosttunnel
-chmod 750 /opt/ghosttunnel
-# NOTE: Do NOT use --system-site-packages — it allows system packages to bleed in.
-python3 -m venv "${VENV_DIR}"
-"${VENV_DIR}/bin/pip" install --upgrade pip --quiet
-"${VENV_DIR}/bin/pip" install . --quiet
+if [ -d "dist_bin" ] && [ -f "dist_bin/ghostd" ]; then
+    echo "[+] Native compiled binaries detected in dist_bin/."
+    echo "[+] Skipping Python virtual environment creation for a faster, native installation."
+else
+    echo "[*] Native binaries not found. Creating Python virtualenv at ${VENV_DIR}..."
+    mkdir -p /opt/ghosttunnel
+    chmod 750 /opt/ghosttunnel
+    # NOTE: Do NOT use --system-site-packages — it allows system packages to bleed in.
+    python3 -m venv "${VENV_DIR}"
+    "${VENV_DIR}/bin/pip" install --upgrade pip --quiet
+    "${VENV_DIR}/bin/pip" install . --quiet
+fi
 
 # 3. Install static panic rules for ExecStartPre (CRIT-01)
 echo "[*] Installing static FAIL CLOSED boot rules..."
