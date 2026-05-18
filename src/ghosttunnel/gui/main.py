@@ -633,12 +633,20 @@ class MainWindow(QMainWindow):
 # Entry point — BUG-GUI-05: returns int exit code
 # ------------------------------------------------------------------
 def main() -> None:
+    print("[*] Initializing QApplication...")
     app = QApplication(sys.argv)
     app.setApplicationName("GhostTunnel")
     app.setApplicationDisplayName("GhostTunnel VPN Kill Switch")
     app.setStyle("Fusion")
 
+    print("[*] Loading settings...")
     settings = Settings.load()
+    
+    print("[*] Creating MainWindow...")
     window = MainWindow(settings)
+    
+    print("[*] Showing window...")
     window.show()
+    
+    print("[*] Entering main loop...")
     sys.exit(app.exec())
