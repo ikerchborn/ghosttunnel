@@ -65,38 +65,40 @@ logger = logging.getLogger(__name__)
 # ------------------------------------------------------------------
 DARK_THEME = """
 QWidget {
-    background-color: #0d1117;
-    color: #c9d1d9;
-    font-family: 'Inter', 'Segoe UI', sans-serif;
+    background-color: #0a0a0a;
+    color: #00ff41;
+    font-family: 'Consolas', 'Courier New', monospace;
     font-size: 14px;
 }
 QMainWindow {
-    background: qlineargradient(x1:0, y1:0, x2:1, y2:1, stop:0 #090c10, stop:1 #161b22);
+    background-color: #000000;
 }
 QGroupBox {
-    border: 1px solid #30363d;
-    border-radius: 10px;
+    border: 1px solid #00ff41;
+    border-radius: 0px;
     margin-top: 14px;
     padding: 14px 16px 10px 16px;
     font-weight: 700;
-    color: #8b949e;
-    font-size: 12px;
+    color: #00ff41;
+    font-size: 13px;
     text-transform: uppercase;
-    letter-spacing: 1px;
+    letter-spacing: 2px;
 }
 QGroupBox::title {
     subcontrol-origin: margin;
     left: 12px;
     padding: 0 6px 0 6px;
-    color: #8b949e;
+    color: #00ff41;
+    background-color: #000000;
 }
 QLabel#AppTitle {
-    font-size: 24px;
+    font-size: 26px;
     font-weight: 800;
-    color: #58a6ff;
+    color: #00ff41;
+    letter-spacing: 2px;
 }
 QLabel#AppSubtitle {
-    color: #8b949e;
+    color: #008f11;
     font-size: 12px;
     letter-spacing: 1px;
     text-transform: uppercase;
@@ -105,76 +107,78 @@ QLabel#StatusBadge {
     font-size: 20px;
     font-weight: 800;
     padding: 8px 20px;
-    border-radius: 8px;
-    background-color: rgba(31,35,40,0.6);
-    border: 1px solid #30363d;
+    border-radius: 0px;
+    background-color: #0a0a0a;
+    border: 1px solid #00ff41;
+    color: #00ff41;
 }
 QPushButton {
-    background-color: #21262d;
-    border: 1px solid #363b42;
-    border-radius: 6px;
-    color: #c9d1d9;
+    background-color: #000000;
+    border: 1px solid #00ff41;
+    border-radius: 0px;
+    color: #00ff41;
     padding: 9px 20px;
-    font-weight: 600;
-    min-height: 36px;
-}
-QPushButton:hover { background-color: #30363d; border-color: #8b949e; }
-QPushButton:pressed { background-color: #1c2128; }
-QPushButton#PanicBtn {
-    background-color: #da3633;
-    color: white;
-    border: 1px solid rgba(240,246,252,0.15);
-    font-size: 15px;
     font-weight: 700;
+    min-height: 36px;
+    text-transform: uppercase;
 }
-QPushButton#PanicBtn:hover { background-color: #f85149; }
+QPushButton:hover { background-color: #00ff41; color: #000000; }
+QPushButton:pressed { background-color: #008f11; color: #000000; }
+QPushButton#PanicBtn {
+    background-color: #3a0000;
+    color: #ff003c;
+    border: 1px solid #ff003c;
+    font-size: 15px;
+    font-weight: 800;
+}
+QPushButton#PanicBtn:hover { background-color: #ff003c; color: #000000; }
 QPushButton#DisablePanicBtn {
-    background-color: #1f6feb;
-    color: white;
-    border: 1px solid rgba(240,246,252,0.15);
+    background-color: #002200;
+    color: #00ff41;
+    border: 1px solid #00ff41;
 }
-QPushButton#DisablePanicBtn:hover { background-color: #388bfd; }
+QPushButton#DisablePanicBtn:hover { background-color: #00ff41; color: #000000; }
 QPushButton#UnlockBtn {
-    background-color: #3d1f00;
-    color: #e3b341;
-    border: 1px solid #7d4e00;
+    background-color: #221100;
+    color: #ffaa00;
+    border: 1px solid #ffaa00;
 }
-QPushButton#UnlockBtn:hover { background-color: #4d2900; }
+QPushButton#UnlockBtn:hover { background-color: #ffaa00; color: #000000; }
 QPushButton#SaveBtn {
-    background-color: #238636;
-    color: white;
-    border: 1px solid rgba(240,246,252,0.1);
+    background-color: #002200;
+    color: #00ff41;
+    border: 1px solid #00ff41;
 }
-QPushButton#SaveBtn:hover { background-color: #2ea043; }
-QCheckBox { spacing: 10px; font-weight: 500; color: #c9d1d9; }
+QPushButton#SaveBtn:hover { background-color: #00ff41; color: #000000; }
+QCheckBox { spacing: 10px; font-weight: 700; color: #00ff41; }
 QCheckBox::indicator {
-    width: 18px; height: 18px; border-radius: 4px;
-    border: 1px solid #30363d; background-color: #0d1117;
+    width: 18px; height: 18px; border-radius: 0px;
+    border: 1px solid #00ff41; background-color: #000000;
 }
-QCheckBox::indicator:checked { background-color: #58a6ff; border-color: #58a6ff; }
-QCheckBox::indicator:hover { border-color: #8b949e; }
+QCheckBox::indicator:checked { background-color: #00ff41; border-color: #00ff41; }
+QCheckBox::indicator:hover { border-color: #008f11; }
 QPlainTextEdit {
-    background-color: #010409;
-    border: 1px solid #21262d;
-    border-radius: 8px;
+    background-color: #000000;
+    border: 1px solid #00ff41;
+    border-radius: 0px;
     padding: 10px;
-    font-family: 'Consolas', 'JetBrains Mono', 'Courier New', monospace;
-    font-size: 12px;
-    color: #3fb950;
+    font-family: 'Consolas', 'Courier New', monospace;
+    font-size: 13px;
+    color: #00ff41;
 }
-QScrollBar:vertical { background: #0d1117; width: 8px; border-radius: 4px; }
-QScrollBar::handle:vertical { background: #30363d; border-radius: 4px; min-height: 20px; }
+QScrollBar:vertical { background: #0a0a0a; width: 12px; border-radius: 0px; border-left: 1px solid #00ff41; }
+QScrollBar::handle:vertical { background: #00ff41; border-radius: 0px; min-height: 20px; }
 """
 
 _MODE_COLORS = {
-    "vpn-up":       ("VPN ACTIVE",      "#3fb950"),
-    "vpn-down":     ("VPN DOWN",         "#f85149"),
-    "panic":        ("PANIC — BLOCKED",  "#f85149"),
-    "disabled":     ("DISABLED",         "#e3b341"),
-    "boot":         ("BOOTING…",         "#8b949e"),
-    "vpn-conflict": ("VPN CONFLICT",     "#f85149"),
-    "error":        ("ERROR",            "#f85149"),
-    "unknown":      ("CONNECTING…",      "#8b949e"),
+    "vpn-up":       ("VPN ACTIVE",      "#00ff41"),
+    "vpn-down":     ("VPN DOWN",         "#ff003c"),
+    "panic":        ("PANIC — BLOCKED",  "#ff003c"),
+    "disabled":     ("DISABLED",         "#ffaa00"),
+    "boot":         ("BOOTING…",         "#008f11"),
+    "vpn-conflict": ("VPN CONFLICT",     "#ff003c"),
+    "error":        ("ERROR",            "#ff003c"),
+    "unknown":      ("CONNECTING…",      "#008f11"),
 }
 
 # Allowlist of subcommands the GUI is allowed to invoke (injection prevention)
@@ -323,7 +327,7 @@ class MainWindow(QMainWindow):
             sg.addWidget(val, row, col + 1)
             self._s[key] = val
 
-        root.addWidget(status_box)
+            self._s[key] = val
 
         # ── Controls ──────────────────────────────────────────────
         ctrl_box = QGroupBox("Controls")
@@ -354,7 +358,7 @@ class MainWindow(QMainWindow):
         ctrl_layout.addStretch()
         ctrl_layout.addWidget(self.btn_refresh)
         ctrl_layout.addWidget(self.btn_unlock)
-        root.addWidget(ctrl_box)
+        ctrl_layout.addWidget(self.btn_unlock)
 
         # ── Config Toggles ────────────────────────────────────────
         cfg_box = QGroupBox("Configuration (saves to /etc/ghosttunnel/config.json)")
@@ -391,7 +395,7 @@ class MainWindow(QMainWindow):
         btn_save.setObjectName("SaveBtn")
         btn_save.clicked.connect(self._save_config)
         cfg_grid.addWidget(btn_save, 3, 0, 1, 2)
-        root.addWidget(cfg_box)
+        cfg_grid.addWidget(btn_save, 3, 0, 1, 2)
 
         # BUG-GUI-09: Disable config saving if not root, to avoid showing default values and confusing user
         if os.geteuid() != 0:
@@ -407,6 +411,12 @@ class MainWindow(QMainWindow):
         self.log.setReadOnly(True)
         self.log.setMaximumBlockCount(500)
         log_layout.addWidget(self.log)
+        log_layout.addWidget(self.log)
+        
+        # Assemble Layout
+        root.addWidget(ctrl_box)
+        root.addWidget(status_box)
+        root.addWidget(cfg_box)
         root.addWidget(log_box)
         root.setStretch(4, 1)  # log expands
 
@@ -426,7 +436,7 @@ class MainWindow(QMainWindow):
         panic = data.get("panic_mode", False)
         self._s["panic_mode"].setText("🔴 YES" if panic else "🟢 NO")
         self._s["panic_mode"].setStyleSheet(
-            "color: #f85149; font-weight: 700;" if panic else "color: #3fb950; font-weight: 700;"
+            "color: #ff003c; font-weight: 700;" if panic else "color: #00ff41; font-weight: 700;"
         )
 
         self._s["vpn_provider"].setText(
@@ -437,7 +447,7 @@ class MainWindow(QMainWindow):
         fw = data.get("firewall_active", False)
         self._s["firewall_active"].setText("🟢 ACTIVE" if fw else "🔴 INACTIVE")
         self._s["firewall_active"].setStyleSheet(
-            "color: #3fb950; font-weight: 700;" if fw else "color: #f85149; font-weight: 700;"
+            "color: #00ff41; font-weight: 700;" if fw else "color: #ff003c; font-weight: 700;"
         )
 
         self._s["route_probe"].setText(data.get("route_probe_iface") or "—")
@@ -451,7 +461,7 @@ class MainWindow(QMainWindow):
     def _on_daemon_gone(self) -> None:
         """BUG-GUI-02/06: Called when both IPC and status file are unavailable."""
         self.badge.setText("DAEMON OFFLINE")
-        self.badge.setStyleSheet("color: #8b949e; border-color: #30363d;")
+        self.badge.setStyleSheet("color: #008f11; border-color: #008f11;")
         for key in self._s:
             self._s[key].setText("—")
         # BUG-GUI-06: Only log once until daemon comes back online

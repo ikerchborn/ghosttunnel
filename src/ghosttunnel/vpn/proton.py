@@ -72,6 +72,8 @@ class ProtonVpnAdapter(VpnAdapter):
             iface=iface_name,
             provider=self.name,
             proton_native_killswitch=native_ks_active,
+            conflict=native_ks_active,
+            conflict_reason="ProtonVPN native kill switch is active. Please disable it to use GhostTunnel." if native_ks_active else "",
         )
 
     def reconnect(self) -> bool:
