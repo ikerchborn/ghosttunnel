@@ -31,7 +31,7 @@ ProtectHome=true
 PrivateTmp=true
 NoNewPrivileges=true
 RuntimeDirectory=ghosttunnel
-RuntimeDirectoryMode=0750
+RuntimeDirectoryMode=0755
 ReadWritePaths=/run/ghosttunnel
 # (HIGH-06) If IP forwarding is needed at runtime, uncomment:
 # ReadWritePaths=/run/ghosttunnel /proc/sys/net/ipv4 /proc/sys/net/ipv6

@@ -58,7 +58,7 @@ chmod 644 /etc/systemd/system/ghosttunnel.service
 # BUG-INST-03: Create /run/ghosttunnel with correct permissions
 # (systemd RuntimeDirectory also creates it, but this ensures it exists pre-boot)
 mkdir -p /run/ghosttunnel
-chmod 750 /run/ghosttunnel
+chmod 755 /run/ghosttunnel
 chown root:root /run/ghosttunnel
 
 # 5. Install emergency recovery script

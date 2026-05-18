@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 class VpnRotator:
     def __init__(self, settings):
         self.settings = settings
-        self.adapters = {adapter.name: adapter for adapter in get_adapters()}
+        self.adapters = {adapter.name: adapter for adapter in get_adapters(settings)}
         self.last_rotation: float = 0.0
         self.cooldown_seconds: float = 15.0
         self.retries: int = 0

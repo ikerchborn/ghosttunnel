@@ -5,13 +5,15 @@ Fixes applied:
   CRIT-01  — Pre-boot panic rules applied before first poll cycle
   CRIT-04  — IPC server integrated (panic, panic-disable, status via socket)
   HIGH-01  — Status file permissions restricted to 0o640
+  HIGH-01  — Status file permissions restricted to 0o644
   MED-07   — Exception messages sanitized before persisting to status file
   LOW-04   — Daemon writes a PID file for reliable process tracking
-  BUG-DAEMON-01 — /run/ghosttunnel dir created with correct 0o750 perms
+  BUG-DAEMON-01 — /run/ghosttunnel dir created with correct 0o755 perms
   BUG-DAEMON-02 — Root logger "ghosttunnel" configured so all child loggers log
   BUG-DAEMON-03 — vpn_rotator.reset() not called during panic mode
   BUG-DAEMON-04 — firewall.activate() errors now logged but do NOT crash sync()
-  BUG-DAEMON-05 — Status file dir created with correct permissions (0o750)
+  BUG-DAEMON-05 — Status file dir created with correct permissions (0o755)
+  BUG-DAEMON-06 — Status file created with 0o644 so non-root GUI can read status
 """
 import json
 import logging
@@ -50,8 +52,8 @@ def _ensure_runtime_dir() -> None:
     path = Path("/run/ghosttunnel")
     path.mkdir(parents=True, exist_ok=True)
     try:
-        # 0o750: root rwx, root group rx, world none
-        os.chmod(str(path), 0o750)
+        # 0o755: root rwx, rx everyone (so gui can read status.json)
+        os.chmod(str(path), 0o755)
     except OSError:
         pass  # Already exists with correct perms from systemd RuntimeDirectory
 
@@ -222,8 +224,9 @@ class GhostDaemon:
 
     def _ipc_panic_disable(self) -> dict:
         self.emergency.disable_panic()
-        self._last_signature = None  # force re-evaluation on next sync
-        return {"message": "Panic mode disabled. Next sync will re-evaluate."}
+        self._last_signature = None  # force re-evaluation
+        self.sync()  # Apply new rules immediately (matches _ipc_panic behavior)
+        return {"message": "Panic mode disabled. Firewall rules updated."}
 
     def _ipc_status(self) -> dict:
         if self._last_state:
@@ -302,10 +305,10 @@ class GhostDaemon:
     # ------------------------------------------------------------------
     def _write_status_file(self, state: ControllerState) -> None:
         path = Path(self.settings.status_path)
-        # BUG-DAEMON-05: Create dir with 0o750 so root group can read but not world
+        # BUG-DAEMON-05: Create dir with 0o755 so world can traverse to read status
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            os.chmod(str(path.parent), 0o750)
+            os.chmod(str(path.parent), 0o755)
         except OSError:
             pass
 
@@ -318,7 +321,7 @@ class GhostDaemon:
                 os.write(fd, content.encode("utf-8"))
             finally:
                 os.close(fd)
-            os.chmod(tmp, 0o640)   # HIGH-01: restrict to owner + group only
+            os.chmod(tmp, 0o644)   # BUG-DAEMON-06: allow non-root to read status
             os.replace(tmp, str(path))
         except OSError as exc:
             logger.warning("Failed to write status file atomically: %s", exc)

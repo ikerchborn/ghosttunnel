@@ -26,6 +26,7 @@ _TRUSTED_BINARIES: dict[str, tuple[str, ...]] = {
     "protonvpn-cli": ("/usr/bin/protonvpn-cli",   "/usr/local/bin/protonvpn-cli"),
     "systemctl":     ("/usr/bin/systemctl",        "/bin/systemctl"),
     "sysctl":        ("/usr/sbin/sysctl",          "/sbin/sysctl",         "/usr/bin/sysctl"),
+    "wg":            ("/usr/bin/wg",),
 }
 
 

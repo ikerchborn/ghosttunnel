@@ -13,7 +13,10 @@ Fully functional GUI with:
   - BUG-GUI-02: connection_lost properly shows daemon offline without crashing
   - BUG-GUI-03: _run_privileged now falls back gracefully if pkexec not available
   - BUG-GUI-04: Save config works even when running as non-root (pkexec escalation)
-  - BUG-GUI-05: GUI entry point returns int exit code correctly
+  - BUG-GUI-05: GUI exit code propagated via sys.exit(app.exec())
+  - BUG-GUI-06: _on_daemon_gone deduplicates log messages (no more spam)
+  - BUG-GUI-07: Refresh button triggers immediate IPC poll
+  - BUG-GUI-08: Obsolete policykit-1 reference replaced with polkitd/pkexec
 """
 from __future__ import annotations
 
@@ -22,6 +25,7 @@ import logging
 import os
 import subprocess
 import sys
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -46,8 +50,6 @@ try:
         QGroupBox,
         QSizePolicy,
         QScrollArea,
-        QSystemTrayIcon,
-        QMenu,
     )
 except ImportError as exc:
     raise RuntimeError(
@@ -191,6 +193,7 @@ class IpcWorker(QThread):
         super().__init__(parent)
         self.status_path = status_path
         self._running = True
+        self._wake = threading.Event()  # BUG-GUI-07: allow immediate poll
 
     def run(self):
         from ghosttunnel.core.ipc import send_command
@@ -203,7 +206,13 @@ class IpcWorker(QThread):
                     self._fallback_read()
             except Exception:
                 self._fallback_read()
-            self.msleep(3000)
+            # BUG-GUI-07: Wait with interruptible event instead of fixed sleep
+            self._wake.wait(timeout=3.0)
+            self._wake.clear()
+
+    def request_poll(self):
+        """BUG-GUI-07: Wake the worker thread for an immediate poll."""
+        self._wake.set()
 
     def _fallback_read(self):
         """BUG-GUI-02: Read status file as fallback when IPC is unavailable."""
@@ -224,6 +233,7 @@ class IpcWorker(QThread):
 
     def stop(self):
         self._running = False
+        self._wake.set()  # Unblock the wait so the thread can exit
         self.quit()
         self.wait(2000)
 
@@ -252,6 +262,7 @@ class MainWindow(QMainWindow):
         self._worker.connection_lost.connect(self._on_daemon_gone)
         self._worker.start()
 
+        self._daemon_offline_logged = False  # BUG-GUI-06: dedup flag
         self._log("GhostTunnel GUI started. Connecting to daemon...")
 
     # ------------------------------------------------------------------
@@ -382,6 +393,13 @@ class MainWindow(QMainWindow):
         cfg_grid.addWidget(btn_save, 3, 0, 1, 2)
         root.addWidget(cfg_box)
 
+        # BUG-GUI-09: Disable config saving if not root, to avoid showing default values and confusing user
+        if os.geteuid() != 0:
+            cfg_box.setTitle("Configuration (READ-ONLY: Root Required)")
+            cfg_box.setEnabled(False)
+            btn_save.setText("Restart GUI as Root to Edit Config")
+            btn_save.setEnabled(False)
+
         # ── Activity Log ──────────────────────────────────────────
         log_box = QGroupBox("Activity Log")
         log_layout = QVBoxLayout(log_box)
@@ -396,6 +414,7 @@ class MainWindow(QMainWindow):
     # Status update
     # ------------------------------------------------------------------
     def _on_status(self, data: dict) -> None:
+        self._daemon_offline_logged = False  # BUG-GUI-06: daemon is back
         raw_mode = data.get("mode", "unknown")
         label, color = _MODE_COLORS.get(raw_mode, (raw_mode.upper(), "#8b949e"))
         self.badge.setText(label)
@@ -430,18 +449,21 @@ class MainWindow(QMainWindow):
         )
 
     def _on_daemon_gone(self) -> None:
-        """BUG-GUI-02: Called when both IPC and status file are unavailable."""
+        """BUG-GUI-02/06: Called when both IPC and status file are unavailable."""
         self.badge.setText("DAEMON OFFLINE")
         self.badge.setStyleSheet("color: #8b949e; border-color: #30363d;")
         for key in self._s:
             self._s[key].setText("—")
-        self._log("⚠ Daemon is unreachable — status file not found or unreadable.")
-        self._log("  → Start daemon: sudo systemctl start ghosttunnel")
+        # BUG-GUI-06: Only log once until daemon comes back online
+        if not self._daemon_offline_logged:
+            self._daemon_offline_logged = True
+            self._log("⚠ Daemon is unreachable — status file not found or unreadable.")
+            self._log("  → Start daemon: sudo systemctl start ghosttunnel")
 
     def _request_manual_refresh(self) -> None:
-        """Manually trigger an IPC status check."""
+        """BUG-GUI-07: Manually trigger an immediate IPC status check."""
         if self._worker and self._worker.isRunning():
-            # The worker polls automatically; just log it
+            self._worker.request_poll()
             self._log("↻ Refresh requested...")
 
     # ------------------------------------------------------------------
@@ -491,7 +513,7 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(
                 self, "Privilege Error",
                 "pkexec is not available and the GUI is not running as root.\n\n"
-                "Install polkit: sudo apt install policykit-1\n"
+                "Install polkit: sudo apt install polkitd pkexec\n"
                 "Or launch GUI as root: sudo ghostgui"
             )
             return False
