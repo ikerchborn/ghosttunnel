@@ -67,30 +67,53 @@ cp src/ghost-recover.sh /usr/local/bin/ghost-recover
 chmod 750 /usr/local/bin/ghost-recover
 chown root:root /usr/local/bin/ghost-recover
 
-# 6. Symlink CLI tools to /usr/local/bin (BUG-INST-02: all 4 symlinks)
-echo "[*] Linking CLI tools..."
-ln -sf "${VENV_DIR}/bin/ghostctl"  /usr/local/bin/ghostctl
-ln -sf "${VENV_DIR}/bin/ghostd"    /usr/local/bin/ghostd
-ln -sf "${VENV_DIR}/bin/ghostgui"  /usr/local/bin/ghostgui
-# Alias for compatibility
-ln -sf "${VENV_DIR}/bin/ghostgui"  /usr/local/bin/ghosttunnel-gui
+# 6. Install CLI tools and GUI to /usr/bin (Fixes sudo secure_path issues)
+echo "[*] Installing CLI tools and GUI..."
+if [ -d "dist_bin" ] && [ -f "dist_bin/ghostctl" ]; then
+    echo "[+] Found native compiled binaries in dist_bin/. Installing directly to /usr/bin..."
+    cp dist_bin/ghostctl /usr/bin/ghostctl
+    cp dist_bin/ghostd   /usr/bin/ghostd
+    cp dist_bin/ghostgui /usr/bin/ghostgui
+    chmod 755 /usr/bin/ghostctl /usr/bin/ghostd /usr/bin/ghostgui
+    ln -sf /usr/bin/ghostgui /usr/bin/ghosttunnel-gui
+else
+    echo "[*] Native binaries not found. Symlinking virtualenv tools to /usr/bin..."
+    ln -sf "${VENV_DIR}/bin/ghostctl"  /usr/bin/ghostctl
+    ln -sf "${VENV_DIR}/bin/ghostd"    /usr/bin/ghostd
+    ln -sf "${VENV_DIR}/bin/ghostgui"  /usr/bin/ghostgui
+    # Alias for compatibility
+    ln -sf "${VENV_DIR}/bin/ghostgui"  /usr/bin/ghosttunnel-gui
 
-# Verify the symlinks resolve correctly
-for bin in ghostctl ghostd ghostgui; do
-  if [ ! -x "${VENV_DIR}/bin/${bin}" ]; then
-    echo "[!] WARNING: ${bin} was not installed correctly. Check pyproject.toml [scripts]."
-  else
-    echo "[+] ${bin} → ${VENV_DIR}/bin/${bin}"
-  fi
-done
+    # Verify the symlinks resolve correctly
+    for bin in ghostctl ghostd ghostgui; do
+      if [ ! -x "${VENV_DIR}/bin/${bin}" ]; then
+        echo "[!] WARNING: ${bin} was not installed correctly. Check pyproject.toml [scripts]."
+      else
+        echo "[+] ${bin} → ${VENV_DIR}/bin/${bin}"
+      fi
+    done
+fi
 
-# 7. Enable and start service (BUG-INST-04: validate service file first)
-echo "[*] Enabling service on boot..."
+# 6.5. Install Desktop Entry
+echo "[*] Installing Desktop Application Entry..."
+if [ -f "assets/ghosttunnel.desktop" ]; then
+    mkdir -p /usr/share/applications
+    cp assets/ghosttunnel.desktop /usr/share/applications/
+    chmod 644 /usr/share/applications/ghosttunnel.desktop
+    echo "[+] Installed ghosttunnel.desktop"
+    if command -v update-desktop-database >/dev/null 2>&1; then
+        update-desktop-database /usr/share/applications/ || true
+    fi
+else
+    echo "[!] WARNING: assets/ghosttunnel.desktop not found. Skipping GUI menu entry."
+fi
+
+# 7. Enable service (User will start it manually)
+echo "[*] Enabling service on boot (Will not start automatically right now)..."
 systemctl daemon-reload
 if systemd-analyze verify /etc/systemd/system/ghosttunnel.service 2>/dev/null; then
   systemctl enable ghosttunnel.service
-  systemctl restart ghosttunnel.service || true
-  echo "[+] Service started."
+  echo "[+] Service enabled. You must start it manually for the first time."
 else
   echo "[!] Service file has issues. Enabling without starting."
   systemctl enable ghosttunnel.service
@@ -111,4 +134,7 @@ echo "[+]   Logs:      sudo ghostctl logs"
 echo "[+]              journalctl -u ghosttunnel -f"
 echo "[+] ========================================================="
 echo "[+]"
-echo "[+] NOTE: Run 'sudo ghostctl status' to verify the daemon is running."
+echo "[+] ⚠  IMPORTANT: GhostTunnel protection is NOT active yet."
+echo "[+]    To activate the killswitch for the first time, run:"
+echo "[+]        sudo systemctl start ghosttunnel"
+echo "[+]"

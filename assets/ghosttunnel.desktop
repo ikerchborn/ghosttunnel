@@ -1,0 +1,10 @@
+[Desktop Entry]
+Name=GhostTunnel
+Comment=FAIL-CLOSED VPN Kill Switch & OPSEC Infrastructure
+Exec=ghostgui
+Icon=security-high
+Terminal=false
+Type=Application
+Categories=System;Security;Network;
+Keywords=VPN;KillSwitch;Security;OPSEC;
+StartupNotify=true

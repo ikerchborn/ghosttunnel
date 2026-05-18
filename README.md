@@ -36,23 +36,36 @@ Most commercial VPN clients use reactive, application-level kill switches. They 
 
 GhostTunnel is built exclusively for modern, `systemd`-driven **Debian-based distributions**. It requires root privileges for installation, service deployment, and kernel-level firewall management.
 
-### Automated Installation
-
-We provide a secure installation script that safely manages dependencies, creates an isolated Python virtual environment, and configures the `systemd` daemon.
+### 1. Compile Native Binaries (Optional but Recommended)
+You can compile GhostTunnel into standalone Linux executables (`.exe` equivalents) for maximum performance and professional integration, avoiding reliance on Python virtual environments.
 
 ```bash
-# 1. Clone the repository
+# Clone the repository
 git clone https://github.com/ikerchborn/ghosttunnel.git
 cd ghosttunnel
 
-# 2. Make the installer executable
-chmod +x install.sh
+# Make the compiler executable and run it
+chmod +x build_binaries.sh
+./build_binaries.sh
+```
+This will create native binaries in the `dist_bin/` folder.
 
-# 3. Deploy GhostTunnel
+### 2. Automated Installation
+We provide a secure installation script that safely manages dependencies and configures the `systemd` daemon. If you ran the compilation step above, it will automatically install the native binaries and the Desktop App shortcut.
+
+```bash
+chmod +x install.sh
 sudo ./install.sh
 ```
 
-Once installed, the background daemon `ghostd` will start automatically and apply the boot-time lockdown rules.
+### 3. First-Time Activation (IMPORTANT)
+**GhostTunnel DOES NOT start automatically upon installation.** This ensures that you do not get unexpectedly locked out of your network while configuring your VPN.
+
+To activate the FAIL-CLOSED killswitch and lock down your network for the first time, you must manually start the daemon:
+```bash
+sudo systemctl start ghosttunnel
+```
+Once started, `ghostd` will automatically apply the boot-time lockdown rules on every future system reboot.
 
 ---
 
@@ -103,14 +116,20 @@ sudo ghostctl logs
 
 ## 🖥️ Graphical User Interface (GUI)
 
-For users who prefer visual telemetry, GhostTunnel includes a Qt6-based desktop application.
+GhostTunnel includes a fully-featured Qt6 desktop application for visual telemetry and control.
 
-Launch it from your desktop menu or via terminal:
-```bash
-ghostgui
-# or
-ghosttunnel-gui
-```
+### How to Access the GUI
+1. **From your Desktop Menu (Recommended):**
+   Open your system's application launcher (Activities, Whisker Menu, etc.), search for **"GhostTunnel"**, and click the icon.
+2. **From the Terminal:**
+   You can also launch it directly by typing:
+   ```bash
+   ghostgui
+   # or
+   ghosttunnel-gui
+   ```
+
+*Note: You do not need to run the GUI as root initially. If you attempt a privileged action (like saving the config or triggering a panic), the GUI will automatically prompt you for your password via `pkexec`.*
 
 ### GUI Capabilities
 - **Live Status Dashboard:** Visual feedback on your VPN status, panic state, active firewall rules, and routed physical interfaces.
