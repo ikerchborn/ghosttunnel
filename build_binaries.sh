@@ -45,7 +45,13 @@ pyinstaller --clean --onefile \
 echo "[*] Compiling 'ghostgui' (GUI)..."
 pyinstaller --clean --onefile \
     --name ghostgui \
-    --collect-all PyQt6 \
+    --collect-submodules PyQt6 \
+    --exclude-module PyQt6.Qt3DCore \
+    --exclude-module PyQt6.QtPdf \
+    --exclude-module PyQt6.QtSql \
+    --exclude-module PyQt6.QtWebView \
+    --exclude-module PyQt6.QtQuick \
+    --exclude-module PyQt6.QtMultimedia \
     --distpath "$DIST_DIR" \
     --workpath "build/ghostgui" \
     --specpath "build/spec" \
