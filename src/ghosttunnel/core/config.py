@@ -11,7 +11,7 @@ import json
 import logging
 import os
 import tempfile
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, asdict
 from pathlib import Path
 from typing import Any
 
@@ -206,7 +206,7 @@ class Settings:
         try:
             dest = Path(path)
             dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
-            data = {k: getattr(self, k) for k in self.__slots__}
+            data = asdict(self)
             content = json.dumps(data, indent=4).encode("utf-8")
             fd, tmp = tempfile.mkstemp(dir=str(dest.parent), prefix=".cfg-", suffix=".tmp")
             try:

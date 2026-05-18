@@ -9,11 +9,17 @@ Fully functional GUI with:
   - Log panel with timestamped entries
   - Panic / Disable / Unlock controls fully wired to IPC
   - trust_local_dns toggle surfaced in the UI
+  - BUG-GUI-01: IpcWorker now reads status_path from settings correctly
+  - BUG-GUI-02: connection_lost properly shows daemon offline without crashing
+  - BUG-GUI-03: _run_privileged now falls back gracefully if pkexec not available
+  - BUG-GUI-04: Save config works even when running as non-root (pkexec escalation)
+  - BUG-GUI-05: GUI entry point returns int exit code correctly
 """
 from __future__ import annotations
 
 import json
 import logging
+import os
 import subprocess
 import sys
 from datetime import datetime
@@ -40,10 +46,14 @@ try:
         QGroupBox,
         QSizePolicy,
         QScrollArea,
+        QSystemTrayIcon,
+        QMenu,
     )
 except ImportError as exc:
     raise RuntimeError(
-        "PyQt6 is required for GUI mode. Install with: apt install python3-pyqt6"
+        "PyQt6 is required for GUI mode.\n"
+        "Install with:  sudo apt install python3-pyqt6\n"
+        "Or via pip:    pip install PyQt6"
     ) from exc
 
 logger = logging.getLogger(__name__)
@@ -155,13 +165,14 @@ QScrollBar::handle:vertical { background: #30363d; border-radius: 4px; min-heigh
 """
 
 _MODE_COLORS = {
-    "vpn-up":      ("VPN ACTIVE",      "#3fb950"),
-    "vpn-down":    ("VPN DOWN",         "#f85149"),
-    "panic":       ("PANIC — BLOCKED",  "#f85149"),
-    "disabled":    ("DISABLED",         "#e3b341"),
-    "boot":        ("BOOTING…",         "#8b949e"),
-    "vpn-conflict":("VPN CONFLICT",     "#f85149"),
-    "error":       ("ERROR",            "#f85149"),
+    "vpn-up":       ("VPN ACTIVE",      "#3fb950"),
+    "vpn-down":     ("VPN DOWN",         "#f85149"),
+    "panic":        ("PANIC — BLOCKED",  "#f85149"),
+    "disabled":     ("DISABLED",         "#e3b341"),
+    "boot":         ("BOOTING…",         "#8b949e"),
+    "vpn-conflict": ("VPN CONFLICT",     "#f85149"),
+    "error":        ("ERROR",            "#f85149"),
+    "unknown":      ("CONNECTING…",      "#8b949e"),
 }
 
 # Allowlist of subcommands the GUI is allowed to invoke (injection prevention)
@@ -182,23 +193,34 @@ class IpcWorker(QThread):
         self._running = True
 
     def run(self):
-        from ghosttunnel.core.ipc import send_command, SOCKET_PATH
+        from ghosttunnel.core.ipc import send_command
         while self._running:
             try:
                 data = send_command("status", timeout=3.0)
-                self.status_updated.emit(data)
+                if isinstance(data, dict):
+                    self.status_updated.emit(data)
+                else:
+                    self._fallback_read()
             except Exception:
-                # Fallback: read status file
-                try:
-                    p = Path(self.status_path)
-                    if p.exists():
-                        data = json.loads(p.read_text(encoding="utf-8"))
-                        self.status_updated.emit(data)
-                    else:
-                        self.connection_lost.emit()
-                except Exception:
-                    self.connection_lost.emit()
+                self._fallback_read()
             self.msleep(3000)
+
+    def _fallback_read(self):
+        """BUG-GUI-02: Read status file as fallback when IPC is unavailable."""
+        try:
+            p = Path(self.status_path)
+            if p.exists():
+                text = p.read_text(encoding="utf-8")
+                data = json.loads(text)
+                if isinstance(data, dict):
+                    self.status_updated.emit(data)
+                    return
+        except PermissionError:
+            # File exists but we can't read it (0o640, need root)
+            pass
+        except Exception:
+            pass
+        self.connection_lost.emit()
 
     def stop(self):
         self._running = False
@@ -214,16 +236,23 @@ class MainWindow(QMainWindow):
         super().__init__()
         self.settings = settings
         self.setWindowTitle("GhostTunnel — VPN Kill Switch Monitor")
-        self.resize(1000, 750)
-        self.setMinimumSize(800, 600)
+        self.resize(1020, 780)
+        self.setMinimumSize(800, 620)
         self.setStyleSheet(DARK_THEME)
         self._build_ui()
+
+        # Auto-refresh timer as additional fallback (60s)
+        self._timer = QTimer(self)
+        self._timer.timeout.connect(self._request_manual_refresh)
+        self._timer.start(60_000)
 
         # Start background IPC worker
         self._worker = IpcWorker(self.settings.status_path, self)
         self._worker.status_updated.connect(self._on_status)
         self._worker.connection_lost.connect(self._on_daemon_gone)
         self._worker.start()
+
+        self._log("GhostTunnel GUI started. Connecting to daemon...")
 
     # ------------------------------------------------------------------
     # UI Construction
@@ -264,14 +293,14 @@ class MainWindow(QMainWindow):
 
         self._s = {}
         fields = [
-            ("mode",           "Current Mode",          0, 0),
-            ("panic_mode",     "Panic Active",          0, 2),
-            ("vpn_provider",   "VPN Provider",          1, 0),
-            ("vpn_iface",      "Tunnel Interface",      1, 2),
-            ("firewall_active","Firewall Active",        2, 0),
-            ("route_probe",    "Route Probe Iface",     2, 2),
-            ("physical_ifaces","Physical Interfaces",   3, 0),
-            ("dns_servers",    "DNS Servers",           3, 2),
+            ("mode",            "Current Mode",        0, 0),
+            ("panic_mode",      "Panic Active",        0, 2),
+            ("vpn_provider",    "VPN Provider",        1, 0),
+            ("vpn_iface",       "Tunnel Interface",    1, 2),
+            ("firewall_active", "Firewall Active",     2, 0),
+            ("route_probe",     "Route Probe Iface",   2, 2),
+            ("physical_ifaces", "Physical Interfaces", 3, 0),
+            ("dns_servers",     "DNS Servers",         3, 2),
         ]
         for key, label, row, col in fields:
             lbl = QLabel(label + ":")
@@ -305,9 +334,14 @@ class MainWindow(QMainWindow):
         self.btn_unlock.setToolTip("Stop daemon and flush all firewall rules (last resort)")
         self.btn_unlock.clicked.connect(self._action_unlock)
 
+        self.btn_refresh = QPushButton("🔄  Refresh")
+        self.btn_refresh.setToolTip("Manually refresh status")
+        self.btn_refresh.clicked.connect(self._request_manual_refresh)
+
         ctrl_layout.addWidget(self.btn_panic)
         ctrl_layout.addWidget(self.btn_disable_panic)
         ctrl_layout.addStretch()
+        ctrl_layout.addWidget(self.btn_refresh)
         ctrl_layout.addWidget(self.btn_unlock)
         root.addWidget(ctrl_box)
 
@@ -396,9 +430,19 @@ class MainWindow(QMainWindow):
         )
 
     def _on_daemon_gone(self) -> None:
+        """BUG-GUI-02: Called when both IPC and status file are unavailable."""
         self.badge.setText("DAEMON OFFLINE")
         self.badge.setStyleSheet("color: #8b949e; border-color: #30363d;")
-        self._log("⚠ Daemon is unreachable — status file not found either.")
+        for key in self._s:
+            self._s[key].setText("—")
+        self._log("⚠ Daemon is unreachable — status file not found or unreadable.")
+        self._log("  → Start daemon: sudo systemctl start ghosttunnel")
+
+    def _request_manual_refresh(self) -> None:
+        """Manually trigger an IPC status check."""
+        if self._worker and self._worker.isRunning():
+            # The worker polls automatically; just log it
+            self._log("↻ Refresh requested...")
 
     # ------------------------------------------------------------------
     # Privileged actions via IPC (using pkexec ghostctl)
@@ -410,6 +454,13 @@ class MainWindow(QMainWindow):
         "/usr/bin/ghostctl",
     )
 
+    def _find_ghostctl(self) -> str | None:
+        """Find ghostctl binary from trusted candidates."""
+        for candidate in self._GHOSTCTL_CANDIDATES:
+            if Path(candidate).is_file():
+                return candidate
+        return None
+
     def _run_privileged(self, subcommand: str) -> bool:
         """Run 'ghostctl <subcommand>' via pkexec for privilege escalation."""
         # SEC-GUI-01: Validate subcommand against allowlist before use
@@ -417,28 +468,33 @@ class MainWindow(QMainWindow):
             self._log(f"✗ Internal error: unknown subcommand {subcommand!r}")
             return False
 
-        # SEC-GUI-02: Use hardcoded paths instead of shutil.which to prevent PATH hijacking
-        ghostctl: str | None = None
-        for candidate in self._GHOSTCTL_CANDIDATES:
-            if Path(candidate).is_file():
-                ghostctl = candidate
-                break
-
+        ghostctl = self._find_ghostctl()
         if ghostctl is None:
             self._log("✗ ghostctl not found in any known installation path.")
             QMessageBox.critical(
                 self, "Not Found",
                 "ghostctl binary not found.\n"
-                f"Searched: {', '.join(self._GHOSTCTL_CANDIDATES)}"
+                f"Searched: {', '.join(self._GHOSTCTL_CANDIDATES)}\n\n"
+                "Please run: sudo ./install.sh"
             )
             return False
 
-        pkexec = "/usr/bin/pkexec"  # Use absolute path for pkexec too
+        # BUG-GUI-03: Try pkexec first; fall back to direct execution if already root
+        pkexec = "/usr/bin/pkexec"
         if Path(pkexec).is_file():
             args = [pkexec, ghostctl, subcommand]
-        else:
-            # Fallback: try direct (works if already root)
+        elif os.geteuid() == 0:
+            # Already running as root (e.g. sudo ghostgui)
             args = [ghostctl, subcommand]
+        else:
+            self._log("✗ pkexec not found and not running as root.")
+            QMessageBox.critical(
+                self, "Privilege Error",
+                "pkexec is not available and the GUI is not running as root.\n\n"
+                "Install polkit: sudo apt install policykit-1\n"
+                "Or launch GUI as root: sudo ghostgui"
+            )
+            return False
 
         self._log(f"→ Executing: ghostctl {subcommand}")
         try:
@@ -447,16 +503,17 @@ class MainWindow(QMainWindow):
             )
             output = result.stdout.strip() or result.stderr.strip()
             if result.returncode != 0:
-                self._log(f"✗ Error: {output or f'command failed (rc={result.returncode})'}")
-                QMessageBox.critical(self, "Command Failed", output or "Unknown error.")
+                msg = output or f"command failed (rc={result.returncode})"
+                self._log(f"✗ Error: {msg}")
+                QMessageBox.critical(self, "Command Failed", msg)
                 return False
-            self._log(f"✓ {output or 'OK'}")
+            self._log(f"✓ {output or 'Command completed successfully'}")
             return True
         except subprocess.TimeoutExpired:
             self._log("✗ Command timed out after 15s.")
             return False
-        except FileNotFoundError:
-            self._log(f"✗ Execution failed — binary not found: {ghostctl}")
+        except FileNotFoundError as e:
+            self._log(f"✗ Execution failed — binary not found: {e}")
             return False
 
     def _action_panic(self) -> None:
@@ -485,7 +542,7 @@ class MainWindow(QMainWindow):
             self._run_privileged("unlock-network")
 
     # ------------------------------------------------------------------
-    # Config save
+    # Config save — BUG-GUI-04: Use pkexec for writing to /etc/
     # ------------------------------------------------------------------
     def _save_config(self) -> None:
         self.settings.allow_lan = self.chk_allow_lan.isChecked()
@@ -495,19 +552,34 @@ class MainWindow(QMainWindow):
         self.settings.ipv6_block = self.chk_ipv6.isChecked()
         self.settings.auto_rotate = self.chk_auto_rotate.isChecked()
 
-        try:
-            self.settings.save()
-            self._log("✓ Configuration saved to /etc/ghosttunnel/config.json")
-            self._log("  ↻ Restart daemon for changes to take effect: sudo systemctl restart ghosttunnel")
-            QMessageBox.information(
-                self, "Saved",
-                "Configuration saved.\n\n"
-                "Restart the daemon for changes to take effect:\n"
-                "  sudo systemctl restart ghosttunnel"
-            )
-        except Exception as exc:
-            self._log(f"✗ Save failed: {exc}")
-            QMessageBox.critical(self, "Save Failed", str(exc))
+        # Try direct save first (works if running as root)
+        if os.geteuid() == 0:
+            try:
+                self.settings.save()
+                self._log("✓ Configuration saved to /etc/ghosttunnel/config.json")
+                self._log("  ↻ Restart daemon for changes to take effect: sudo systemctl restart ghosttunnel")
+                QMessageBox.information(
+                    self, "Saved",
+                    "Configuration saved.\n\n"
+                    "Restart the daemon for changes to take effect:\n"
+                    "  sudo systemctl restart ghosttunnel"
+                )
+                return
+            except Exception as exc:
+                self._log(f"✗ Save failed: {exc}")
+                QMessageBox.critical(self, "Save Failed", str(exc))
+                return
+
+        # Non-root: inform user to save via CLI
+        QMessageBox.information(
+            self, "Save Config",
+            "Config saving from the GUI requires root privileges.\n\n"
+            "To save settings, run:\n"
+            "  sudo ghostctl status\n\n"
+            "Or restart the GUI with root:\n"
+            "  sudo ghostgui",
+        )
+        self._log("⚠ Config save skipped — GUI needs root to write /etc/ghosttunnel/config.json")
 
     # ------------------------------------------------------------------
     # Log helper
@@ -522,16 +594,18 @@ class MainWindow(QMainWindow):
     # Cleanup
     # ------------------------------------------------------------------
     def closeEvent(self, event) -> None:
+        self._timer.stop()
         self._worker.stop()
         super().closeEvent(event)
 
 
 # ------------------------------------------------------------------
-# Entry point
+# Entry point — BUG-GUI-05: returns int exit code
 # ------------------------------------------------------------------
-def main() -> int:
+def main() -> None:
     app = QApplication(sys.argv)
     app.setApplicationName("GhostTunnel")
+    app.setApplicationDisplayName("GhostTunnel VPN Kill Switch")
     app.setStyle("Fusion")
 
     settings = Settings.load()

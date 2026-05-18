@@ -82,9 +82,16 @@ class ProtonVpnAdapter(VpnAdapter):
         except FileNotFoundError:
             logger.error("protonvpn-cli not found. Cannot reconnect ProtonVPN.")
             return False
-        try:
-            run([cli, "c", "-f"], timeout=15)  # MED-03: explicit timeout
-            return True
-        except (CommandError, FileNotFoundError) as e:
-            logger.error("Failed to reconnect ProtonVPN via CLI: %s", e)
-            return False
+        # BUG-PROTON-03: Try modern CLI syntax first, fall back to legacy.
+        # Modern: protonvpn-cli connect --fastest
+        # Legacy: protonvpn-cli c -f
+        for cmd_args in ([cli, "connect", "--fastest"], [cli, "c", "-f"]):
+            try:
+                run(cmd_args, timeout=15)  # MED-03: explicit timeout
+                logger.info("ProtonVPN reconnect succeeded with: %s", " ".join(cmd_args[1:]))
+                return True
+            except (CommandError, FileNotFoundError) as e:
+                logger.warning("ProtonVPN reconnect attempt failed (%s): %s",
+                               " ".join(cmd_args[1:]), e)
+        logger.error("All ProtonVPN reconnect attempts failed.")
+        return False

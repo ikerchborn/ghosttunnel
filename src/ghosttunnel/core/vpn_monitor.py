@@ -13,9 +13,11 @@ from ghosttunnel.vpn import get_adapters
 logger = logging.getLogger(__name__)
 
 
+from ghosttunnel.core.config import Settings
+
 class VpnMonitor:
-    def __init__(self):
-        self.adapters = get_adapters()
+    def __init__(self, settings: Settings):
+        self.adapters = get_adapters(settings)
 
     def determine_state(self, snapshot: NetworkSnapshot) -> VpnState:
         """

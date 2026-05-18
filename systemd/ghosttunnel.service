@@ -3,7 +3,6 @@ Description=GhostTunnel - Advanced VPN Kill Switch & OPSEC Tool
 # Fix for Early Boot Race Condition: Run BEFORE any network interfaces are brought up.
 DefaultDependencies=no
 Before=network-pre.target
-Wants=network-pre.target
 
 [Service]
 Type=simple

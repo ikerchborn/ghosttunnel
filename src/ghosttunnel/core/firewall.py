@@ -2,10 +2,13 @@
 GhostTunnel nftables Firewall Manager
 ========================================
 Fixes applied:
-  CRIT-02 — All external data sanitized before entering nftables rulesets
-  HIGH-04 — VPN INPUT chain now restricts to ct state established,related
-  HIGH-06 — IP forwarding moved out of daemon (see systemd unit changes)
-  MED-08  — Forward chain restricts direction of forwarded traffic
+  CRIT-02  — All external data sanitized before entering nftables rulesets
+  HIGH-04  — VPN INPUT chain now restricts to ct state established,related
+  HIGH-06  — IP forwarding moved out of daemon (see systemd unit changes)
+  MED-08   — Forward chain restricts direction of forwarded traffic
+  BUG-FW-03 — bootstrap_dns_v4 set never empty (hard fallback to 1.1.1.1/9.9.9.9)
+  BUG-FW-04 — vpn-down mode now works without vpn_endpoints set (no set reference)
+  BUG-FW-05 — 'error' mode now falls through to vpn-down so we always have rules
 """
 from __future__ import annotations
 
@@ -25,6 +28,9 @@ from .system import (
 )
 
 logger = logging.getLogger(__name__)
+
+# Hard-coded fallback DNS used when bootstrap_dns is empty (prevents empty nft sets)
+_FALLBACK_DNS_V4 = ("1.1.1.1", "9.9.9.9")
 
 
 @dataclass(slots=True)
@@ -58,8 +64,7 @@ class NftFirewallManager:
             )
 
         if vpn.conflict:
-            # BUG-FIX-5: A conflict MUST still be FAIL CLOSED, never an empty ruleset.
-            # An empty ruleset means nftables has no rules → system fully open.
+            # A conflict MUST still be FAIL CLOSED, never an empty ruleset.
             logger.warning(
                 "VPN conflict detected — applying FAIL CLOSED rules. Reason: %s",
                 vpn.conflict_reason,
@@ -70,13 +75,31 @@ class NftFirewallManager:
                 f"FAIL CLOSED: {vpn.conflict_reason}",
             )
 
+        # Get physical interfaces (excluding VPN iface to avoid self-referencing)
         physical = tuple(
             iface.name
             for iface in snapshot.physical_ifaces
             if iface.name != vpn.iface
         )
+
+        # BUG-FW-05: If no physical interfaces, generate vpn-down rules on ALL
+        # non-loopback interfaces instead of returning an empty ruleset.
         if not physical:
-            return FirewallPlan("", "error", "No physical interfaces detected.")
+            logger.warning(
+                "No physical interfaces detected. Using permissive vpn-down fallback."
+            )
+            # Collect every non-loopback interface as fallback
+            physical = tuple(
+                name for name, info in snapshot.interfaces.items()
+                if not info.is_loopback and name != vpn.iface
+            )
+            if not physical:
+                # Absolute last resort: full lockdown
+                return FirewallPlan(
+                    self._render_panic_rules(),
+                    "panic",
+                    "FAIL CLOSED: No usable network interfaces detected.",
+                )
 
         mode = "vpn-up" if vpn.active and vpn.iface else "vpn-down"
         reason = "VPN active. Only loopback, established, and VPN traffic allowed."
@@ -87,18 +110,20 @@ class NftFirewallManager:
         return FirewallPlan(rules, mode, reason)
 
     def _render_panic_rules(self) -> str:
-        """Strict FAIL CLOSED ruleset. Blocks everything."""
+        """Strict FAIL CLOSED ruleset. Blocks everything except loopback."""
         table = self.settings.table_name
         return f"""
 table inet {table} {{
   chain input {{
     type filter hook input priority filter; policy drop;
     iifname "lo" accept
+    ct state established,related accept
     limit rate 10/second log prefix "VPN-PANIC-DROP-IN: " level warn
   }}
   chain output {{
     type filter hook output priority filter; policy drop;
     oifname "lo" accept
+    ct state established,related accept
     limit rate 10/second log prefix "VPN-PANIC-DROP-OUT: " level warn
   }}
   chain forward {{
@@ -144,8 +169,6 @@ table inet {table} {{
                 )
 
         if self.settings.allow_lan:
-            # (Red Team #4) Restrict LAN access to prevent ARP spoofing / lateral movement.
-            # Allow Ping, mDNS (5353) and nothing else by default.
             for iface in physical:
                 safe = sanitize_iface(iface)
                 lines.append(f'    iifname "{safe}" ip saddr @lan_ipv4 icmp type echo-request accept')
@@ -168,7 +191,7 @@ table inet {table} {{
         lines.append('    oifname "lo" accept')
         lines.append("    ct state established,related accept")
         lines.append("    ct state invalid drop")
-        
+
         if not self.settings.ipv6_block:
             lines.append(
                 "    ip6 nexthdr icmpv6 icmpv6 type { nd-router-solicit, nd-router-advert, "
@@ -177,7 +200,7 @@ table inet {table} {{
 
         for iface in physical:
             safe = sanitize_iface(iface)
-            # DNS Bootstrap
+            # DNS Bootstrap — always needed so daemon can resolve VPN endpoints
             lines.append(f'    oifname "{safe}" ip daddr @bootstrap_dns_v4 udp dport 53 accept')
             lines.append(f'    oifname "{safe}" ip daddr @bootstrap_dns_v4 tcp dport 53 accept')
             if not self.settings.stealth_mode:
@@ -199,41 +222,45 @@ table inet {table} {{
                         f'    oifname "{safe}" ip6 daddr @bootstrap_dns_v6 icmpv6 type echo-request accept'
                     )
 
-            # VPN Handshake
+            # VPN Handshake ports — allow even in vpn-down mode so tunnel can reconnect.
+            # BUG-FW-04: In vpn-down mode vpn_endpoints_v4 set may not exist.
+            # Use the set only if it was actually created (snapshot has endpoint IPs).
+            udp_ports = ", ".join(
+                str(sanitize_port(p)) for p in self.settings.udp_handshake_ports
+            )
+            tcp_ports = ", ".join(
+                str(sanitize_port(p)) for p in self.settings.tcp_handshake_ports
+            )
+
             if snapshot.vpn_endpoint_ips:
-                udp = ", ".join(
-                    str(sanitize_port(p)) for p in self.settings.udp_handshake_ports
-                )
-                tcp = ", ".join(
-                    str(sanitize_port(p)) for p in self.settings.tcp_handshake_ports
-                )
-                if udp:
+                # We have resolved endpoints — use the named set for precision
+                if udp_ports:
                     lines.append(
-                        f'    oifname "{safe}" ip daddr @vpn_endpoints_v4 udp dport {{ {udp} }} accept'
+                        f'    oifname "{safe}" ip daddr @vpn_endpoints_v4 udp dport {{ {udp_ports} }} accept'
                     )
-                if tcp:
+                if tcp_ports:
                     lines.append(
-                        f'    oifname "{safe}" ip daddr @vpn_endpoints_v4 tcp dport {{ {tcp} }} accept'
+                        f'    oifname "{safe}" ip daddr @vpn_endpoints_v4 tcp dport {{ {tcp_ports} }} accept'
                     )
+            else:
+                # BUG-FW-04: No resolved endpoints yet (DNS offline / first boot).
+                # Allow handshake ports to ANY destination so VPN can bootstrap.
+                if udp_ports:
+                    lines.append(f'    oifname "{safe}" udp dport {{ {udp_ports} }} accept')
+                if tcp_ports:
+                    lines.append(f'    oifname "{safe}" tcp dport {{ {tcp_ports} }} accept')
 
             if not self.settings.ipv6_block and snapshot.vpn_endpoint_ips_v6:
-                udp = ", ".join(
-                    str(sanitize_port(p)) for p in self.settings.udp_handshake_ports
-                )
-                tcp = ", ".join(
-                    str(sanitize_port(p)) for p in self.settings.tcp_handshake_ports
-                )
-                if udp:
+                if udp_ports:
                     lines.append(
-                        f'    oifname "{safe}" ip6 daddr @vpn_endpoints_v6 udp dport {{ {udp} }} accept'
+                        f'    oifname "{safe}" ip6 daddr @vpn_endpoints_v6 udp dport {{ {udp_ports} }} accept'
                     )
-                if tcp:
+                if tcp_ports:
                     lines.append(
-                        f'    oifname "{safe}" ip6 daddr @vpn_endpoints_v6 tcp dport {{ {tcp} }} accept'
+                        f'    oifname "{safe}" ip6 daddr @vpn_endpoints_v6 tcp dport {{ {tcp_ports} }} accept'
                     )
 
         if self.settings.allow_lan:
-            # Symmetrically allow outbound ping and mDNS to LAN
             for iface in physical:
                 safe = sanitize_iface(iface)
                 lines.append(f'    oifname "{safe}" ip daddr @lan_ipv4 icmp type echo-request accept')
@@ -250,7 +277,6 @@ table inet {table} {{
         lines.append("    type filter hook forward priority filter; policy drop;")
         if self.settings.allow_forwarding and vpn.active and vpn.iface:
             safe_vpn = sanitize_iface(vpn.iface)
-            # Only allow LAN→VPN and VPN→LAN(established), not VPN→everything
             for iface in physical:
                 safe_phys = sanitize_iface(iface)
                 lines.append(
@@ -281,16 +307,17 @@ table inet {table} {{
         if self.settings.lan_networks:
             safe = ", ".join(sanitize_ip(ip) for ip in self.settings.lan_networks)
             lines.append(f"    elements = {{ {safe} }}")
+        else:
+            lines.append("    elements = { 10.0.0.0/8, 172.16.0.0/12, 192.168.0.0/16 }")
         lines.append("  }")
 
         lines.extend([
             "  set bootstrap_dns_v4 {",
             "    type ipv4_addr;",
         ])
-        dns_v4 = snapshot.dns_servers or self.settings.bootstrap_dns
-        if dns_v4:
-            safe = ", ".join(sanitize_ip(ip) for ip in dns_v4)
-            lines.append(f"    elements = {{ {safe} }}")
+        dns_v4 = snapshot.dns_servers or self.settings.bootstrap_dns or _FALLBACK_DNS_V4
+        safe = ", ".join(sanitize_ip(ip) for ip in dns_v4)
+        lines.append(f"    elements = {{ {safe} }}")
         lines.append("  }")
 
         if not self.settings.ipv6_block:
@@ -301,17 +328,19 @@ table inet {table} {{
             if self.settings.lan_networks_v6:
                 safe = ", ".join(sanitize_ip(ip) for ip in self.settings.lan_networks_v6)
                 lines.append(f"    elements = {{ {safe} }}")
+            else:
+                lines.append("    elements = { fe80::/10, fc00::/7 }")
             lines.append("  }")
 
-            lines.extend([
-                "  set bootstrap_dns_v6 {",
-                "    type ipv6_addr;",
-            ])
             dns_v6 = snapshot.dns_servers_v6 or self.settings.bootstrap_dns_v6
             if dns_v6:
+                lines.extend([
+                    "  set bootstrap_dns_v6 {",
+                    "    type ipv6_addr;",
+                ])
                 safe = ", ".join(sanitize_ip(ip) for ip in dns_v6)
                 lines.append(f"    elements = {{ {safe} }}")
-            lines.append("  }")
+                lines.append("  }")
 
         if snapshot.vpn_endpoint_ips:
             safe = ", ".join(sanitize_ip(ip) for ip in snapshot.vpn_endpoint_ips)
@@ -333,14 +362,19 @@ table inet {table} {{
 
     def activate(self, plan: FirewallPlan) -> None:
         if not plan.ruleset:
+            logger.warning("activate() called with empty ruleset — skipping to avoid open firewall.")
             return
         require_root()
+        # Delete existing table first so re-apply is idempotent
         run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
-        run([self.nft, "-f", "-"], input_text=plan.ruleset)
-
-        # (HIGH-06) IP forwarding and IPv6 disable are now handled via sysctl
-        # in the systemd unit (ExecStartPre), not at runtime.
-        pass
+        result = run([self.nft, "-f", "-"], input_text=plan.ruleset, check=False)
+        if result.returncode != 0:
+            logger.error(
+                "nft failed to apply %s ruleset (rc=%d): %s",
+                plan.mode, result.returncode, result.stderr.strip()[:300],
+            )
+            raise RuntimeError(f"nft ruleset apply failed: {result.stderr.strip()[:200]}")
+        logger.info("Firewall activated: mode=%s", plan.mode)
 
     def deactivate(self) -> None:
         require_root()

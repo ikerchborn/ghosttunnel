@@ -2,11 +2,16 @@
 GhostTunnel Daemon
 ====================
 Fixes applied:
-  CRIT-01 — Pre-boot panic rules applied before first poll cycle
-  CRIT-04 — IPC server integrated (panic, panic-disable, status via socket)
-  HIGH-01 — Status file permissions restricted to 0o640
-  MED-07  — Exception messages sanitized before persisting to status file
-  LOW-04  — Daemon writes a PID file for reliable process tracking
+  CRIT-01  — Pre-boot panic rules applied before first poll cycle
+  CRIT-04  — IPC server integrated (panic, panic-disable, status via socket)
+  HIGH-01  — Status file permissions restricted to 0o640
+  MED-07   — Exception messages sanitized before persisting to status file
+  LOW-04   — Daemon writes a PID file for reliable process tracking
+  BUG-DAEMON-01 — /run/ghosttunnel dir created with correct 0o750 perms
+  BUG-DAEMON-02 — Root logger "ghosttunnel" configured so all child loggers log
+  BUG-DAEMON-03 — vpn_rotator.reset() not called during panic mode
+  BUG-DAEMON-04 — firewall.activate() errors now logged but do NOT crash sync()
+  BUG-DAEMON-05 — Status file dir created with correct permissions (0o750)
 """
 import json
 import logging
@@ -40,11 +45,22 @@ def _sanitize_error(exc: Exception) -> str:
     return sanitized[:_MAX_ERROR_MSG]
 
 
+def _ensure_runtime_dir() -> None:
+    """Create /run/ghosttunnel with correct permissions if it doesn't exist."""
+    path = Path("/run/ghosttunnel")
+    path.mkdir(parents=True, exist_ok=True)
+    try:
+        # 0o750: root rwx, root group rx, world none
+        os.chmod(str(path), 0o750)
+    except OSError:
+        pass  # Already exists with correct perms from systemd RuntimeDirectory
+
+
 class GhostDaemon:
     def __init__(self, settings: Settings):
         self.settings = settings
         self.leak_detector = LeakDetector(settings)
-        self.vpn_monitor = VpnMonitor()
+        self.vpn_monitor = VpnMonitor(settings)
         self.vpn_rotator = VpnRotator(settings)
         self.firewall = NftFirewallManager(settings)
         self.emergency = EmergencyController()
@@ -61,24 +77,20 @@ class GhostDaemon:
         """
         Ensure the network is locked BEFORE the first snapshot completes.
         If the daemon starts with an existing panic lock, apply panic rules.
-        Otherwise apply a strict 'vpn-down' policy that only permits DNS +
-        VPN handshake traffic.
+        Otherwise apply panic rules and let the first sync() open up appropriately.
         """
         try:
             if self.emergency.is_panic():
                 logger.warning("Panic lock found at boot — applying FAIL CLOSED rules immediately.")
-                plan = FirewallPlan(
-                    self.firewall._render_panic_rules(),
-                    "panic",
-                    "FAIL CLOSED: Panic state persisted from previous run.",
-                )
+                mode = "panic"
             else:
-                # Boot-safe: block everything except DNS bootstrap + VPN handshake
-                plan = FirewallPlan(
-                    self.firewall._render_panic_rules(),
-                    "boot",
-                    "Boot lockdown: blocking until first successful sync.",
-                )
+                mode = "boot"
+
+            plan = FirewallPlan(
+                self.firewall._render_panic_rules(),
+                mode,
+                f"Boot lockdown ({mode}): blocking until first successful sync.",
+            )
             self.firewall.activate(plan)
             logger.info("Boot rules applied: mode=%s", plan.mode)
         except Exception as exc:
@@ -103,13 +115,14 @@ class GhostDaemon:
                     if self.settings.auto_rotate:
                         self.emergency.trigger_panic("All VPN rotation attempts failed")
 
-            if vpn_state.active and not vpn_state.is_leaking:
+            # BUG-DAEMON-03: Only reset rotator when VPN is healthy AND not in panic
+            if vpn_state.active and not vpn_state.is_leaking and not self.emergency.is_panic():
                 self.vpn_rotator.reset()
 
             # Firewall Planning
             plan = self.firewall.build_plan(snapshot, vpn_state, self.emergency.is_panic())
 
-            # State Signature check
+            # State Signature — only update firewall when something meaningful changed
             signature = json.dumps({
                 "mode": plan.mode,
                 "panic": self.emergency.is_panic(),
@@ -121,8 +134,19 @@ class GhostDaemon:
                     "Network state changed — mode=%s, panic=%s",
                     plan.mode, self.emergency.is_panic(),
                 )
-                if plan.mode != "error" and not vpn_state.conflict:
+                # BUG-DAEMON-04: Catch firewall errors so sync() never crashes silently
+                try:
                     self.firewall.activate(plan)
+                except Exception as fw_exc:
+                    logger.error("Firewall activate failed: %s — applying panic rules", fw_exc)
+                    try:
+                        self.firewall.activate(FirewallPlan(
+                            self.firewall._render_panic_rules(),
+                            "panic",
+                            "FAIL CLOSED: Firewall apply error.",
+                        ))
+                    except Exception as inner:
+                        logger.critical("Could not apply panic rules either: %s", inner)
                 self._last_signature = signature
 
             state = ControllerState(
@@ -178,9 +202,8 @@ class GhostDaemon:
     def disable(self) -> None:
         """
         Disables panic mode and forces a re-sync.
-        SEC-DAEMON-01: Removed firewall.deactivate() which would leave the
-        system unprotected (empty ruleset). We instead rely on the next sync()
-        to calculate the safe set of rules.
+        SEC-DAEMON-01: Removed firewall.deactivate() — we rely on next sync()
+        to calculate the correct safe ruleset.
         """
         self.emergency.disable_panic()
         self._last_signature = None
@@ -228,8 +251,11 @@ class GhostDaemon:
             pass
 
     def run(self):
-        logger.info("Starting GhostTunnel Daemon...")
+        logger.info("Starting GhostTunnel Daemon v1.0.0...")
         self._running = True
+
+        # BUG-DAEMON-01: Ensure runtime dir exists with correct permissions
+        _ensure_runtime_dir()
 
         # LOW-04: Write PID file immediately
         self._write_pid()
@@ -246,17 +272,22 @@ class GhostDaemon:
         self._ipc.start()
 
         def handle_signal(signum, frame):
-            logger.info("Received termination signal.")
+            logger.info("Received termination signal (sig=%d).", signum)
             self._running = False
 
         signal.signal(signal.SIGINT, handle_signal)
         signal.signal(signal.SIGTERM, handle_signal)
 
+        logger.info(
+            "Daemon started. Poll interval: %.1fs. IPC: /run/ghosttunnel/ctrl.sock",
+            self.settings.monitor_poll_seconds,
+        )
+
         while self._running:
             try:
                 self.sync()
             except Exception as e:
-                # Final safety net — should never reach here
+                # Final safety net — should never reach here since sync() catches internally
                 logger.critical("Unhandled exception in daemon loop: %s", _sanitize_error(e))
             time.sleep(self.settings.monitor_poll_seconds)
 
@@ -264,14 +295,20 @@ class GhostDaemon:
         if self._ipc:
             self._ipc.stop()
         self._remove_pid()
-        logger.info("Daemon stopped.")
+        logger.info("Daemon stopped cleanly.")
 
     # ------------------------------------------------------------------
     # Status file (HIGH-01: permissions 0o640)
     # ------------------------------------------------------------------
     def _write_status_file(self, state: ControllerState) -> None:
         path = Path(self.settings.status_path)
-        path.parent.mkdir(parents=True, exist_ok=True)
+        # BUG-DAEMON-05: Create dir with 0o750 so root group can read but not world
+        try:
+            path.parent.mkdir(parents=True, exist_ok=True)
+            os.chmod(str(path.parent), 0o750)
+        except OSError:
+            pass
+
         content = json.dumps(asdict(state), indent=2)
         try:
             fd, tmp = tempfile.mkstemp(
@@ -284,14 +321,19 @@ class GhostDaemon:
             os.chmod(tmp, 0o640)   # HIGH-01: restrict to owner + group only
             os.replace(tmp, str(path))
         except OSError as exc:
-            # Do NOT fall back to a non-atomic write — a half-written status
-            # file is misleading. Just log and move on.
             logger.warning("Failed to write status file atomically: %s", exc)
 
 
 def main():
     import ghosttunnel.core.logger as log_setup
-    log_setup.setup_logger("ghosttunnel.daemon")
+    # BUG-DAEMON-02: Configure the ROOT "ghosttunnel" logger so ALL child loggers
+    # (ghosttunnel.daemon, ghosttunnel.core.*, ghosttunnel.vpn.*) inherit the handler.
+    root_logger = log_setup.setup_logger("ghosttunnel")
+    root_logger.propagate = False
+
+    # Re-bind the module logger now that the handler is installed
+    global logger
+    logger = logging.getLogger(__name__)
 
     settings = Settings.load()
     daemon = GhostDaemon(settings)

@@ -5,13 +5,20 @@ Fixes applied:
   HIGH-02   — No global socket.setdefaulttimeout mutation
   CRIT-02   — IP addresses from resolv.conf are validated before use
   BUG-FIX-1 — Corrected indentation error that broke the trust_local_dns block
+  BUG-DNS-01 — resolve_hosts() now respects a per-call timeout (5s) to prevent
+               the daemon sync loop from hanging on DNS resolution failures.
 """
 import ipaddress
+import logging
 import socket
+import threading
 from pathlib import Path
 from typing import Tuple
 
 from .config import Settings
+
+logger = logging.getLogger(__name__)
+_DNS_RESOLVE_TIMEOUT = 5.0  # seconds per host
 
 
 def get_dns_servers(settings: Settings) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
@@ -59,7 +66,8 @@ def get_dns_servers(settings: Settings) -> Tuple[Tuple[str, ...], Tuple[str, ...
 def resolve_hosts(hosts: list[str]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
     """
     Resolves VPN endpoint domains to IPv4 and IPv6 addresses.
-    Uses per-socket timeout instead of global default (HIGH-02).
+    Uses per-call timeout via threads to prevent blocking the daemon sync loop
+    (BUG-DNS-01). Respects HIGH-02: no global socket.setdefaulttimeout mutation.
     """
     ips_v4: list[str] = []
     ips_v6: list[str] = []
@@ -68,11 +76,25 @@ def resolve_hosts(hosts: list[str]) -> Tuple[Tuple[str, ...], Tuple[str, ...]]:
         return (), ()
 
     for host in hosts:
-        try:
-            answers = socket.getaddrinfo(host, None, socket.AF_UNSPEC, socket.SOCK_STREAM)
-        except (socket.gaierror, OSError):
+        result: list = []
+        exc_holder: list = []
+
+        def _resolve(h=host, out=result, err=exc_holder):
+            try:
+                out.extend(socket.getaddrinfo(h, None, socket.AF_UNSPEC, socket.SOCK_STREAM))
+            except (socket.gaierror, OSError) as e:
+                err.append(e)
+
+        t = threading.Thread(target=_resolve, daemon=True)
+        t.start()
+        t.join(timeout=_DNS_RESOLVE_TIMEOUT)
+        if t.is_alive():
+            logger.warning("DNS resolution timed out for host: %s", host)
             continue
-        for answer in answers:
+        if exc_holder:
+            continue
+
+        for answer in result:
             family = answer[0]
             ip = answer[4][0]
             # Validate resolved IP (CRIT-02)

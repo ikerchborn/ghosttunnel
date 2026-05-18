@@ -106,10 +106,18 @@ class LeakDetector:
             routes = json.loads(output or "[]")
         except json.JSONDecodeError:
             routes = []
+        # BUG-LEAK-02: Pick the lowest-metric route to avoid ECMP false positives.
+        best = None
+        best_metric = float("inf")
         for route in routes:
             iface = route.get("dev")
-            if iface: return iface
-        return None
+            if not iface:
+                continue
+            metric = route.get("metric", 0)
+            if metric < best_metric:
+                best_metric = metric
+                best = iface
+        return best
 
     def _probe_route_iface(self) -> str | None:
         result = run([self.ip_bin, "route", "get", "1.1.1.1"], check=False).stdout.strip()
