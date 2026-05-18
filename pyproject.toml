@@ -40,9 +40,9 @@ ghostd   = "ghosttunnel.daemon:main"
 ghostgui = "ghosttunnel.gui.main:main"
 
 [project.urls]
-Homepage   = "https://github.com/yourusername/ghosttunnel"
-Repository = "https://github.com/yourusername/ghosttunnel"
-Issues     = "https://github.com/yourusername/ghosttunnel/issues"
+Homepage   = "https://github.com/ikerchborn/ghosttunnel"
+Repository = "https://github.com/ikerchborn/ghosttunnel"
+Issues     = "https://github.com/ikerchborn/ghosttunnel/issues"
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]

@@ -19,7 +19,7 @@ echo "[+] ========================================================="
 # 1. Install system dependencies
 echo "[*] Installing dependencies (nftables, iproute2, python3)..."
 apt-get update -qq
-apt-get install -y python3 python3-full python3-venv nftables iproute2 policykit-1 libnftables1 build-essential pkg-config
+apt-get install -y python3 python3-full python3-venv nftables iproute2 polkitd pkexec libnftables1 build-essential pkg-config
 
 # 2. Create dedicated isolated virtualenv (HIGH-05)
 VENV_DIR="/opt/ghosttunnel/venv"

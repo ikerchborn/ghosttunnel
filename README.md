@@ -58,7 +58,10 @@ Requires superuser (Root) permissions and a modern `systemd`-based Linux distrib
 git clone https://github.com/ikerchborn/ghosttunnel.git
 cd ghosttunnel
 
-# 2. Run the installer (installs dependencies, sets up virtualenv, configures systemd)
+# 2. Make the installer executable
+chmod +x install.sh
+
+# 3. Run the installer (installs dependencies, sets up virtualenv, configures systemd)
 sudo ./install.sh
 ```
 
