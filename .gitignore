@@ -15,6 +15,10 @@ env/
 
 # Build tools
 *.spec
+#Audit
+SECURITY.md
+ARCHITECTURE.md
+
 
 # Testing & audit output
 .pytest_cache/
