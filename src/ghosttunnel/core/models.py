@@ -74,3 +74,4 @@ class ControllerState:
     dns_servers_v6: tuple[str, ...]
     proton_native_killswitch: bool
     panic_mode: bool = False
+    anomalies: tuple[str, ...] = ()

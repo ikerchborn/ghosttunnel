@@ -32,6 +32,7 @@ from ghosttunnel.core.vpn_monitor import VpnMonitor
 from ghosttunnel.core.vpn_rotator import VpnRotator
 from ghosttunnel.core.emergency import EmergencyController
 from ghosttunnel.core.ipc import IpcServer
+from ghosttunnel.core.anomaly import AnomalyDetector
 
 logger = logging.getLogger(__name__)
 
@@ -66,6 +67,7 @@ class GhostDaemon:
         self.vpn_rotator = VpnRotator(settings)
         self.firewall = NftFirewallManager(settings)
         self.emergency = EmergencyController()
+        self.anomaly_detector = AnomalyDetector()
 
         self._running = False
         self._last_signature: str | None = None
@@ -154,6 +156,14 @@ class GhostDaemon:
                         logger.critical("Could not apply panic rules either: %s", inner)
                 self._last_signature = signature
 
+            # Anomaly Detection
+            anomalies = self.anomaly_detector.analyze(
+                snapshot=snapshot,
+                current_mode=plan.mode,
+                vpn_provider=vpn_state.provider,
+                vpn_iface=vpn_state.iface,
+            )
+
             state = ControllerState(
                 mode=plan.mode,
                 firewall_active=self.firewall.is_active(),
@@ -166,6 +176,7 @@ class GhostDaemon:
                 dns_servers_v6=snapshot.dns_servers_v6,
                 proton_native_killswitch=vpn_state.proton_native_killswitch,
                 panic_mode=self.emergency.is_panic(),
+                anomalies=tuple(anomalies),
             )
             self._write_status_file(state)
             self._last_state = state
