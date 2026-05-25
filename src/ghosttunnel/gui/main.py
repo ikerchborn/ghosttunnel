@@ -4,19 +4,19 @@ GhostTunnel GUI — Qt6 Desktop Monitoring Interface
 Fully functional GUI with:
   - Live status via IPC socket (not just file polling)
   - Status file fallback for read-only viewing
-  - Privilege escalation via pkexec for all root commands
+  - Privilege escalation via IPC for all root commands
   - Config persistence (save to /etc/ghosttunnel/config.json)
   - Log panel with timestamped entries
   - Panic / Disable / Unlock controls fully wired to IPC
   - trust_local_dns toggle surfaced in the UI
   - BUG-GUI-01: IpcWorker now reads status_path from settings correctly
   - BUG-GUI-02: connection_lost properly shows daemon offline without crashing
-  - BUG-GUI-03: _run_privileged now falls back gracefully if pkexec not available
-  - BUG-GUI-04: Save config works even when running as non-root (pkexec escalation)
+  - BUG-GUI-03: _run_privileged now falls back gracefully via IPC
+  - BUG-GUI-04: Save config works via IPC
   - BUG-GUI-05: GUI exit code propagated via sys.exit(app.exec())
   - BUG-GUI-06: _on_daemon_gone deduplicates log messages (no more spam)
   - BUG-GUI-07: Refresh button triggers immediate IPC poll
-  - BUG-GUI-08: Obsolete policykit-1 reference replaced with polkitd/pkexec
+  - BUG-GUI-08: Obsolete policykit-1 reference removed
 """
 from __future__ import annotations
 
@@ -200,19 +200,26 @@ class IpcWorker(QThread):
         self._wake = threading.Event()  # BUG-GUI-07: allow immediate poll
 
     def run(self):
-        from ghosttunnel.core.ipc import send_command
+        import socket, json
+        from ghosttunnel.core.ipc import STATUS_SOCKET_PATH
         while self._running:
             try:
-                data = send_command("status", timeout=3.0)
-                if isinstance(data, dict):
-                    self.status_updated.emit(data)
-                else:
-                    self._fallback_read()
+                with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+                    s.settimeout(10.0)
+                    s.connect(STATUS_SOCKET_PATH)
+                    while self._running:
+                        f = s.makefile('r', encoding='utf-8')
+                        line = f.readline()
+                        if not line:
+                            break
+                        data = json.loads(line)
+                        if data.get("event") == "status_change":
+                            state = data.get("state", {})
+                            self.status_updated.emit(state)
             except Exception:
                 self._fallback_read()
-            # BUG-GUI-07: Wait with interruptible event instead of fixed sleep
-            self._wake.wait(timeout=3.0)
-            self._wake.clear()
+                self._wake.wait(timeout=3.0)
+                self._wake.clear()
 
     def request_poll(self):
         """BUG-GUI-07: Wake the worker thread for an immediate poll."""
@@ -475,75 +482,25 @@ class MainWindow(QMainWindow):
             self._log("↻ Refresh requested...")
 
     # ------------------------------------------------------------------
-    # Privileged actions via IPC (using pkexec ghostctl)
+    # Privileged actions via IPC (direct to socket)
     # ------------------------------------------------------------------
-    # Hardcoded trusted paths for ghostctl — prevents PATH injection (LOW-01)
-    _GHOSTCTL_CANDIDATES = (
-        "/opt/ghosttunnel/venv/bin/ghostctl",
-        "/usr/local/bin/ghostctl",
-        "/usr/bin/ghostctl",
-    )
-
-    def _find_ghostctl(self) -> str | None:
-        """Find ghostctl binary from trusted candidates."""
-        for candidate in self._GHOSTCTL_CANDIDATES:
-            if Path(candidate).is_file():
-                return candidate
-        return None
-
     def _run_privileged(self, subcommand: str) -> bool:
-        """Run 'ghostctl <subcommand>' via pkexec for privilege escalation."""
-        # SEC-GUI-01: Validate subcommand against allowlist before use
-        if subcommand not in ALLOWED_SUBCOMMANDS:
-            self._log(f"✗ Internal error: unknown subcommand {subcommand!r}")
-            return False
-
-        ghostctl = self._find_ghostctl()
-        if ghostctl is None:
-            self._log("✗ ghostctl not found in any known installation path.")
-            QMessageBox.critical(
-                self, "Not Found",
-                "ghostctl binary not found.\n"
-                f"Searched: {', '.join(self._GHOSTCTL_CANDIDATES)}\n\n"
-                "Please run: sudo ./install.sh"
-            )
-            return False
-
-        # BUG-GUI-03: Try pkexec first; fall back to direct execution if already root
-        pkexec = "/usr/bin/pkexec"
-        if Path(pkexec).is_file():
-            args = [pkexec, ghostctl, subcommand]
-        elif os.geteuid() == 0:
-            # Already running as root (e.g. sudo ghostgui)
-            args = [ghostctl, subcommand]
-        else:
-            self._log("✗ pkexec not found and not running as root.")
-            QMessageBox.critical(
-                self, "Privilege Error",
-                "pkexec is not available and the GUI is not running as root.\n\n"
-                "Install polkit: sudo apt install polkitd pkexec\n"
-                "Or launch GUI as root: sudo ghostgui"
-            )
-            return False
-
-        self._log(f"→ Executing: ghostctl {subcommand}")
+        from ghosttunnel.core.ipc import send_command
+        self._log(f"→ Sending command: {subcommand}")
         try:
-            result = subprocess.run(
-                args, capture_output=True, text=True, check=False, timeout=15
-            )
-            output = result.stdout.strip() or result.stderr.strip()
-            if result.returncode != 0:
-                msg = output or f"command failed (rc={result.returncode})"
+            resp = send_command(subcommand)
+            if resp.get("ok"):
+                msg = resp.get("message", "Success")
+                self._log(f"✓ {msg}")
+                return True
+            else:
+                msg = resp.get("error", "Unknown error")
                 self._log(f"✗ Error: {msg}")
                 QMessageBox.critical(self, "Command Failed", msg)
                 return False
-            self._log(f"✓ {output or 'Command completed successfully'}")
-            return True
-        except subprocess.TimeoutExpired:
-            self._log("✗ Command timed out after 15s.")
-            return False
-        except FileNotFoundError as e:
-            self._log(f"✗ Execution failed — binary not found: {e}")
+        except Exception as e:
+            self._log(f"✗ IPC Error: {e}")
+            QMessageBox.critical(self, "Connection Error", str(e))
             return False
 
     def _action_panic(self) -> None:
@@ -572,7 +529,7 @@ class MainWindow(QMainWindow):
             self._run_privileged("unlock-network")
 
     # ------------------------------------------------------------------
-    # Config save — BUG-GUI-04: Use pkexec for writing to /etc/
+    # Config save — BUG-GUI-04: Requires root for writing to /etc/
     # ------------------------------------------------------------------
     def _save_config(self) -> None:
         self.settings.allow_lan = self.chk_allow_lan.isChecked()

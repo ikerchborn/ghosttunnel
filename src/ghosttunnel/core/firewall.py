@@ -44,6 +44,14 @@ class NftFirewallManager:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.table_ref = f"inet {self.settings.table_name}"
+        self.external_ks_active = False
+        try:
+            res = run([self.nft, "list", "chains"], check=False)
+            if "PVPN" in res.stdout or "pvpn" in res.stdout or "pvpn-killswitch" in res.stdout:
+                self.external_ks_active = True
+                logger.info("External killswitch detected. GhostTunnel will use isolated chain GHOSTTUNNEL_KS.")
+        except Exception:
+            pass
 
     @property
     def nft(self) -> str:
@@ -139,13 +147,22 @@ table inet {table} {{
         physical: tuple[str, ...],
         mode: str,
     ) -> str:
-        table = self.settings.table_name
-        lines: list[str] = [f"table inet {table} {{"]
+        if self.external_ks_active:
+            # When external KS is active, inject into standard filter table 
+            # and append rules as GHOSTTUNNEL_KS chain drops/accepts.
+            lines = ["table inet filter {"]
+        else:
+            table = self.settings.table_name
+            lines = [f"table inet {table} {{"]
         lines.extend(self._render_sets(snapshot))
 
         # -- INPUT CHAIN --
-        lines.append("  chain input {")
-        lines.append("    type filter hook input priority filter; policy drop;")
+        if self.external_ks_active:
+            lines.append("  chain GHOSTTUNNEL_KS_IN {")
+            lines.append("    type filter hook input priority -10;")
+        else:
+            lines.append("  chain input {")
+            lines.append("    type filter hook input priority filter; policy drop;")
 
         # (HIGH-04) VPN input: only accept established/related, NOT new connections.
         if vpn.active and vpn.iface:
@@ -178,11 +195,17 @@ table inet {table} {{
                     lines.append(f'    iifname "{safe}" ip6 saddr @lan_ipv6 udp dport 5353 accept')
 
         lines.append('    limit rate 10/second log prefix "VPN-KillSwitch-In: " level warn')
+        if self.external_ks_active:
+            lines.append("    drop")
         lines.append("  }")
 
         # -- OUTPUT CHAIN --
-        lines.append("  chain output {")
-        lines.append("    type filter hook output priority filter; policy drop;")
+        if self.external_ks_active:
+            lines.append("  chain GHOSTTUNNEL_KS_OUT {")
+            lines.append("    type filter hook output priority -10;")
+        else:
+            lines.append("  chain output {")
+            lines.append("    type filter hook output priority filter; policy drop;")
 
         if vpn.active and vpn.iface:
             safe_iface = sanitize_iface(vpn.iface)
@@ -270,11 +293,17 @@ table inet {table} {{
                     lines.append(f'    oifname "{safe}" ip6 daddr @lan_ipv6 udp dport 5353 accept')
 
         lines.append('    limit rate 10/second log prefix "VPN-KillSwitch-Out: " level warn')
+        if self.external_ks_active:
+            lines.append("    drop")
         lines.append("  }")
 
         # -- FORWARD CHAIN (MED-08: restricted direction) --
-        lines.append("  chain forward {")
-        lines.append("    type filter hook forward priority filter; policy drop;")
+        if self.external_ks_active:
+            lines.append("  chain GHOSTTUNNEL_KS_FWD {")
+            lines.append("    type filter hook forward priority -10;")
+        else:
+            lines.append("  chain forward {")
+            lines.append("    type filter hook forward priority filter; policy drop;")
         if self.settings.allow_forwarding and vpn.active and vpn.iface:
             safe_vpn = sanitize_iface(vpn.iface)
             for iface in physical:
@@ -286,6 +315,8 @@ table inet {table} {{
                     f'    iifname "{safe_vpn}" oifname "{safe_phys}" ct state established,related accept'
                 )
         lines.append("    ct state invalid drop")
+        if self.external_ks_active:
+            lines.append("    drop")
         lines.append("  }")
 
         # -- NAT CHAIN --
@@ -362,11 +393,12 @@ table inet {table} {{
 
     def activate(self, plan: FirewallPlan) -> None:
         if not plan.ruleset:
-            logger.warning("activate() called with empty ruleset — skipping to avoid open firewall.")
             return
         require_root()
-        # Delete existing table first so re-apply is idempotent
-        run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
+        if self.external_ks_active:
+            self.deactivate()
+        else:
+            run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
         result = run([self.nft, "-f", "-"], input_text=plan.ruleset, check=False)
         if result.returncode != 0:
             logger.error(
@@ -378,7 +410,12 @@ table inet {table} {{
 
     def deactivate(self) -> None:
         require_root()
-        run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
+        if self.external_ks_active:
+            run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_IN"], check=False)
+            run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_OUT"], check=False)
+            run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_FWD"], check=False)
+        else:
+            run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
 
     def is_active(self) -> bool:
         try:

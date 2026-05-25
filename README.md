@@ -5,203 +5,156 @@
   [![Python 3.12+](https://img.shields.io/badge/python-3.12+-blue.svg)](https://www.python.org/downloads/)
   [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](https://opensource.org/licenses/MIT)
   [![Security Policy](https://img.shields.io/badge/Security-Policy-red.svg)](./SECURITY.md)
-  [![Architecture: V1.0](https://img.shields.io/badge/Architecture-Native_V1.0-brightgreen.svg)](#)
+  [![Architecture: V2.0](https://img.shields.io/badge/Architecture-Event--Driven_V2.0-brightgreen.svg)](#)
 </div>
 
 ---
 
-## 📖 Introduction
+## 1. Overview
 
-**GhostTunnel** is an enterprise-grade, daemonized OPSEC (Operations Security) infrastructure specifically engineered for **Debian-based Linux systems** (Debian, Ubuntu, Kali, ParrotOS). It acts as the ultimate fail-safe for your privacy by implementing a strict **FAIL-CLOSED** architecture. 
+**GhostTunnel** is an enterprise-grade, daemonized OPSEC (Operations Security) infrastructure specifically engineered to enforce a strict **FAIL-CLOSED** firewall posture. 
 
-If your VPN drops for even a millisecond, GhostTunnel guarantees that absolutely zero unencrypted packets will leave your machine. By using atomic `nftables` operations at the kernel level, it secures your network before your operating system even finishes booting.
+If your VPN drops, GhostTunnel guarantees that absolutely zero unencrypted packets will leave your machine. By using atomic `nftables` transactions, it secures your network before your operating system even finishes booting and responds dynamically to network changes.
 
-Designed exclusively for the Debian network stack to guarantee absolute stability and predictable kernel behavior, GhostTunnel provides an impenetrable shield around your internet traffic—whether you are a privacy researcher, an investigative journalist, a security professional, or simply an enterprise user who refuses to compromise on network integrity.
-
----
-
-## ⚡ The GhostTunnel Difference
-
-Most commercial VPN clients use reactive, application-level kill switches. They monitor a connection, wait for it to fail, and *then* react to block traffic. This creates a critical window of vulnerability (often 1-3 seconds) where your real IP address leaks to your ISP.
-
-**GhostTunnel operates differently:**
-- **Proactive Kernel Integration:** Using atomic `nftables` transactions, GhostTunnel replaces the entire system firewall matrix in a fraction of a millisecond.
-- **Pre-Boot Lockdown:** Protection starts at `network-pre.target`. Your system is locked down *before* network interfaces are even initialized.
-- **Strict "FAIL-CLOSED" Philosophy:** If the daemon crashes, if a bug occurs, or if your VPN provider is experiencing conflicts, the system defaults to blocking all traffic. **Privacy over Connectivity, always.**
-- **Secure IPC Socket:** User interaction is handled via a root-authenticated Unix Domain Socket (`SO_PEERCRED`), preventing malicious local processes from tampering with your security state.
-
-### 🌟 Architecture v1.0.0 (Native Build)
-GhostTunnel has been completely overhauled to resolve all common Linux deployment constraints:
-- **Zero-Dependency Native Binaries:** GhostTunnel can now be compiled into pure Linux executables. No more messy Python virtual environments or `pip` conflicts.
-- **Universal Sudo Path Resolution:** Binaries are safely installed natively in `/usr/bin/`, completely eliminating the notorious `sudo: command not found` errors caused by restrictive `secure_path` settings in Parrot OS and Kali Linux.
-- **Rootless GUI Experience:** The graphical interface integrates directly into your Desktop Menu. It launches without requiring `root` and securely escalates privileges on-the-fly via `pkexec` only when you execute a critical action.
-- **Fail-Safe Installation:** The installation script gracefully configures the daemon without instantly locking your network, allowing you to manually trigger your first-time lockdown when you are actually ready.
+This architecture prioritizes **Privacy over Connectivity, always.** It provides an impenetrable shield around your internet traffic, eliminating the 1-3 second window of vulnerability present in traditional reactive kill switches.
 
 ---
 
-## 🛠️ Installation & Deployment
+## 2. Requirements
 
-GhostTunnel requires root privileges for installation, service deployment, and kernel-level firewall management.
+GhostTunnel is designed exclusively for **Debian-based Linux systems** (Debian, Ubuntu, Kali, ParrotOS). 
 
-### 1. Compile Native Binaries (Highly Recommended)
-Compiling GhostTunnel into standalone Linux executables (`.exe` equivalents) provides maximum performance and bypasses the need for Python virtual environments.
+**System Dependencies:**
+- `nftables` (Core firewall engine)
+- `systemd` (Daemon management and pre-boot initialization)
+- `python3` (Python 3.12+ recommended)
+- `python3-pyqt6` (For the GUI)
+
+---
+
+## 3. Installation
+
+GhostTunnel must be installed via the provided bash script, which configures the systemd service, installs dependencies, and creates the required UNIX groups for secure local access.
 
 ```bash
-# Clone the repository
 git clone https://github.com/ikerchborn/ghosttunnel.git
 cd ghosttunnel
-
-# Make the compiler executable and run it
-chmod +x build_binaries.sh
-./build_binaries.sh
-```
-This generates the native executables inside the `dist_bin/` folder.
-
-### 2. Run the Installer
-The installation script will automatically detect if you compiled the native binaries and install them instantly. If you skipped step 1, it will fallback to safely creating an isolated Python virtual environment instead.
-
-```bash
 chmod +x install.sh
 sudo ./install.sh
 ```
 
-### 3. First-Time Activation (IMPORTANT)
-**GhostTunnel DOES NOT start automatically upon installation.** This ensures that you do not get unexpectedly locked out of your network while configuring your VPN for the first time.
+> [!WARNING]
+> **Mandatory Session Restart:**
+> The installer automatically creates a `ghosttunnel` group and adds your current user to it. **You must log out and log in again** for these group permissions to take effect before using the GUI or CLI.
 
-To activate the FAIL-CLOSED killswitch and lock down your network, you must manually start the daemon:
+---
+
+## 4. Architecture
+
+GhostTunnel relies on a highly secure **Event-Driven IPC (Inter-Process Communication)** model, splitting operations into a privileged backend and an unprivileged frontend.
+
+### The Two-Socket Model
+Instead of relying on legacy polling or risky privilege escalation, GhostTunnel uses two dedicated Unix Domain Sockets located in `/run/ghosttunnel/`:
+1. **`ctrl.sock` (Control):** A blocking request/response socket used to send commands to the daemon.
+   - **Permissions:** `0o660` (Root + `ghosttunnel` group).
+   - **Format:** `{"action": "<name>", "payload": {}}`
+2. **`status.sock` (Status):** A continuous pub/sub stream where the daemon broadcasts state changes instantly.
+   - **Permissions:** `0o664` (Root + `ghosttunnel` group).
+   - **Format:** `{"event": "status_change", "state": "<state_dict>", "timestamp": <unix_ts>}`
+
+### Privilege Model
+- **Daemon (`ghostd`):** Runs as `root` via systemd. It handles all raw `nftables` manipulation, routing analysis, and network interface reading.
+- **GUI (`ghostgui`):** Runs entirely in user-space as your standard user. Because your user is in the `ghosttunnel` group, it authenticates to the sockets securely via kernel-level `SO_PEERCRED` group-ID validation.
+
+---
+
+## 5. Usage
+
+### Starting the Engine
+GhostTunnel **does not start automatically** upon installation to prevent locking you out while configuring your VPN.
 ```bash
 sudo systemctl start ghosttunnel
+sudo systemctl enable ghosttunnel
 ```
-Once started, `ghostd` will automatically apply the boot-time lockdown rules on every future system reboot.
 
----
-
-## 🖥️ Graphical User Interface (GUI)
-
-GhostTunnel includes a fully-featured Qt6 desktop application for visual telemetry and control, styled with a premium "Matrix hacker" aesthetic (neon green on pure black) and an optimized layout with controls prioritized at the top.
-
-### How to Access the GUI
-1. **From your Desktop Menu (Recommended):**
-   Open your system's application launcher (Activities, Whisker Menu, KDE Menu, etc.), search for **"GhostTunnel"**, and click the shield icon.
-2. **From the Terminal:**
-   You can also launch it directly by typing:
-   ```bash
-   ghostgui
-   # or
-   ghosttunnel-gui
-   ```
-
-*Note: You do not need to run the GUI as root initially. If you attempt a privileged action (like saving the config or triggering a panic), the GUI will automatically prompt you for your password via `pkexec`.*
-
-### GUI Capabilities
-- **Live Status Dashboard:** Visual feedback on your VPN status, panic state, active firewall rules, and routed physical interfaces.
-- **One-Click Controls:** Dedicated buttons to trigger PANIC, Disable PANIC, or Emergency Unlock.
-- **Activity Log:** Real-time stream of daemon events and status changes.
-- **Dynamic Configuration:** Toggle advanced features directly from the UI without touching the configuration files.
-
----
-
-## 💻 CLI Manual (`ghostctl`)
-
-While the GUI is convenient, GhostTunnel can be fully operated via the `ghostctl` Command Line Interface.
-
-### Real-Time Telemetry
-Check the active VPN provider, interface, current firewall mode, and DNS status:
+### Graphical User Interface (GUI)
+Launch the control panel from your desktop application launcher or via terminal:
 ```bash
-sudo ghostctl status
+ghostgui
 ```
+The GUI connects directly to the daemon's event socket, providing real-time telemetry, a live activity log, and one-click controls for **PANIC**, **Disable Panic**, and **Emergency Unlock**.
 
-### Physical Panic Switch
-Instantly cut off the entire network, blocking all incoming and outgoing traffic regardless of your VPN state. Crucial if you suspect an imminent local intrusion or physical compromise:
-```bash
-sudo ghostctl panic
-```
+### Command Line Interface (`ghostctl`)
+The `ghostctl` binary interacts with the daemon's control socket:
+- `ghostctl status`: Show current protection status.
+- `ghostctl panic`: Instantly cut off the entire network.
+- `ghostctl panic-disable`: Restore normal operation.
+- `ghostctl unlock-network`: Emergency stop the daemon and flush rules.
 
-### Restore Operations
-Disable panic mode and instruct the daemon to safely re-evaluate the network state:
-```bash
-sudo ghostctl panic-disable
-```
-
-### Emergency Network Unlock
-If you need to completely remove all GhostTunnel defenses (e.g., to diagnose a broken network interface without an active tunnel), this will stop the daemon and flush the `nftables` rules.
-> **Warning:** Your real IP will be exposed to your ISP.
-```bash
-sudo ghostctl unlock-network
-```
-*(Alternatively, a standalone recovery script `sudo ghost-recover` is provided for emergencies if Python itself fails).*
-
-### Audit Logs
-Monitor the real-time background decisions made by the security engine:
-```bash
-sudo ghostctl logs
-```
+*(Note: While CLI commands previously required `sudo`, any user in the `ghosttunnel` group can now execute them).*
 
 ---
 
-## ⚙️ Advanced Configuration (`config.json`)
+## 6. Pre-Push Security Pipeline
 
-GhostTunnel's behavior can be customized via the GUI or by editing `/etc/ghosttunnel/config.json`. 
+GhostTunnel enforces code integrity via autonomous AI subagents. Before any commit is pushed to the repository, a strict verification pipeline executes:
 
-### Core OPSEC Settings
-- **`kill_switch`**: (Default: `true`) Master toggle for the fail-closed architecture.
-- **`ipv6_block`**: (Default: `true`) Completely drops all IPv6 traffic to prevent IPv6 routing leaks, a common vulnerability in modern OS configurations.
-- **`stealth_mode`**: (Default: `false`) Drops ICMP (Ping) packets and randomizes specific network signatures to hide your machine from local network scanning.
-- **`trust_local_dns`**: (Default: `false`) **CRITICAL:** If false, GhostTunnel ignores DNS servers provided by your local router (DHCP), preventing C2 DNS Injection and rogue ISP tracking. It will exclusively route DNS through your VPN or secure bootstrap resolvers.
+When a developer runs `verify and push`, the following autonomous agents are triggered:
+- **`security_auditor`:** Scans for SQLi, XSS, insecure dependencies, path traversals, hardcoded secrets, and unsafe deserialization.
+- **`qa_engineer`:** Enforces linting, unit tests, and structural validation.
 
-### Advanced Routing
-- **`allow_lan`**: (Default: `false`) Permits traffic to local subnets (e.g., `192.168.x.x`). Enable this if you need to access local printers or NAS devices while the VPN is active.
-- **`allow_forwarding`**: (Default: `false`) Enables NAT Masquerading and IP Forwarding. Required if you are running Docker containers, VMs (KVM/VirtualBox), or using HackTheBox setups through the VPN tunnel.
-
-### Auto-Rotation & Resilience
-- **`auto_rotate`**: (Default: `false`) If the active VPN fails, GhostTunnel will automatically attempt to reconnect or rotate to the next available VPN provider defined in `vpn_priority`.
-- **`vpn_priority`**: Order of preference for VPN auto-rotation. (e.g., `["protonvpn", "wireguard", "openvpn"]`).
+Only if both subagents return a clean bill of health will the `git push` command be authorized.
 
 ---
 
-## 🌍 VPN Integration & Compatibility
+## 7. Killswitch Compatibility
 
-GhostTunnel features an agnostic network detection engine. It does not rely on fragile application hooks; instead, it monitors the actual routing layer.
+GhostTunnel is engineered to coexist peacefully with commercial VPNs like **ProtonVPN** that use their own internal killswitches.
 
-### Out-of-the-Box Support
-1. **WireGuard (`wg0`, `mullvad0`, `nordlynx`):** Native detection for standard WireGuard implementations.
-2. **OpenVPN (`tun0`, `tap0`):** Full compatibility with legacy OpenVPN setups.
-3. **ProtonVPN (`pvpn-`, `proton0`):** Deep integration with both the official ProtonVPN CLI and the modern GUI. To prevent silent firewall rule collisions, GhostTunnel explicitly detects Proton's native kill switch (`pvpnksintrf0`) and enters a fail-closed `conflict` state, alerting the user to disable Proton's native kill switch to proceed safely.
-
-### Integrating Custom VPN Providers
-
-If you use a proprietary or custom VPN (e.g., Tailscale, custom IPSec, corporate VPNs), you can easily map it into GhostTunnel's fail-closed matrix.
-
-1. **Identify the Interface:** Connect to your VPN and run `ip link show`. Identify the prefix of the virtual interface (e.g., if the interface is `tailscale0`, the prefix is `tailscale`).
-2. **Add to Configuration:** Open `/etc/ghosttunnel/config.json` (or use the GUI) and add the prefix to the `"vpn_hints"` array:
-   ```json
-   "vpn_hints": [
-       "wg",
-       "tun",
-       "pvpn",
-       "tailscale"
-   ]
-   ```
-3. **Restart Daemon:** `sudo systemctl restart ghosttunnel`.
-4. GhostTunnel will now recognize `tailscale` as a secure tunnel and wrap it in the atomic kill switch rules.
+- **Non-Destructive Operations:** The daemon actively scans for existing VPN rules (e.g., ProtonVPN's `pvpn-killswitch` chains). 
+- **Isolated Chain Injection:** If external chains are detected, GhostTunnel abandons its private table and injects its own high-priority isolated chains (`GHOSTTUNNEL_KS_IN`, `_OUT`, `_FWD`) directly into the standard `inet filter` table.
+- **Idempotence:** GhostTunnel never blindly flushes the `inet` table. On daemon stop, or when executing `ghost-recover.sh`, it exclusively deletes the `GHOSTTUNNEL_KS_*` chains, ensuring that ProtonVPN's native security layer is left completely intact.
 
 ---
 
-## 🛡️ Threat Modeling & Mitigations
+## 8. Security Model
 
-GhostTunnel is engineered to defend against specific, high-risk OPSEC failures:
-
-| Threat | GhostTunnel Mitigation |
-|--------|-----------------------|
-| **Boot-time Leaks** | Applies `panic.rules` at `network-pre.target` before OS services can phone home. |
-| **Micro-Drops (Wi-Fi flicker)** | Atomic `nftables` replacement ensures the drop policy is enforced in < 1ms. |
-| **Rogue DNS (DHCP Spoofing)** | Discards local router DNS; forces all lookups through secure endpoints. |
-| **IPv6 Sideloading** | Aggressive, system-wide IPv6 dropping by default. |
-| **Malware Disabling Security** | Daemon strictly validates `SO_PEERCRED`. Only `root` can modify the security state. |
+- **No `pkexec` or `sudo` at Runtime:** The GUI has been stripped of all privilege escalation mechanisms. It operates 100% via the secure Unix socket.
+- **Kernel-Level Authentication:** Socket requests are authenticated by the Linux kernel using `SO_PEERCRED` to verify the sender's GID matches the `ghosttunnel` group.
+- **Zero Shell Injection:** A strict static audit confirms zero usage of `shell=True`, `eval`, or unescaped `subprocess` commands across the entire codebase.
 
 ---
 
-<div align="center">
-  <p><i>Privacy is not a privilege; it's a fundamental right.</i></p>
-  <p><i>Developed under strict Offensive Security principles.</i></p>
-</div>
+## 9. Development & Verification
+
+### Dev Environment
+GhostTunnel relies heavily on Linux-native kernel mechanics (`nftables`, `systemd`, `AF_UNIX` sockets). If developing on **Windows**, a WSL (Windows Subsystem for Linux) environment is strictly required to execute or test the daemon natively.
+
+### Static Verification Suite
+To verify the integrity of the architecture and ensure no regressions occur during development, run the following 8 static assertions:
+
+```bash
+# 1. No privilege escalation tools left behind
+grep -rn "pkexec" src/
+
+# 2. No polling loops in the GUI (watchdogs only)
+grep -rn "time.sleep" src/
+
+# 3. No shell injection vectors
+grep -rn "shell=True" src/
+
+# 4. No destructive rule flushes
+grep -rn "nft flush" src/
+
+# 5. Full table deletion restricted to recovery scripts
+grep -rn "nft delete table inet ghosttunnel" src/
+
+# 6. Socket Auth verified
+grep -rn "SO_PEERCRED\|GID\|getgroups" src/core/ipc.py
+
+# 7. Dual sockets present
+grep -rn "status.sock\|ctrl.sock" src/
+
+# 8. Isolated chain integration
+grep -rn "GHOSTTUNNEL_KS" src/core/firewall.py
+```

@@ -1,19 +1,3 @@
-"""
-GhostTunnel IPC Server — Unix Domain Socket
-============================================
-Fixes CRIT-04: Replaces the stub CLI panic trigger with real IPC.
-
-Protocol: newline-delimited JSON
-  Request:  {"cmd": "panic"} | {"cmd": "panic-disable"} | {"cmd": "status"}
-  Response: {"ok": true, ...} | {"ok": false, "error": "..."}
-
-Socket:  /run/ghosttunnel/ctrl.sock (permissions 0o600, root only)
-
-Security hardening (SEC-IPC-01):
-  - SO_PEERCRED validation: only UID 0 (root) may send commands.
-  - JSON decode errors on send_command() are caught and re-raised as
-    ConnectionRefusedError so callers handle them uniformly.
-"""
 from __future__ import annotations
 
 import json
@@ -27,106 +11,118 @@ from typing import Callable
 
 logger = logging.getLogger(__name__)
 
-SOCKET_PATH = "/run/ghosttunnel/ctrl.sock"
-_SOCKET_PERMS = 0o600          # root read/write only
+CTRL_SOCKET_PATH = "/run/ghosttunnel/ctrl.sock"
+STATUS_SOCKET_PATH = "/run/ghosttunnel/status.sock"
 _RECV_LIMIT = 4096
 _CLIENT_TIMEOUT = 5.0
-_MAX_CHUNKS = 64  # Maximum recv() calls per message (prevents slow-loris)
-
+_MAX_CHUNKS = 64
 
 class IpcServer:
-    """
-    Lightweight IPC server running as a daemon thread inside ghostd.
-    Handlers are callables that return a dict merged into the JSON response.
-    """
-
     def __init__(self, handlers: dict[str, Callable[[], dict]]) -> None:
         self.handlers = handlers
-        self._sock: socket.socket | None = None
-        self._thread: threading.Thread | None = None
+        self._ctrl_sock: socket.socket | None = None
+        self._status_sock: socket.socket | None = None
         self._running = False
-
-    # ------------------------------------------------------------------
-    # Public API
-    # ------------------------------------------------------------------
+        self._status_clients: list[socket.socket] = []
+        self._status_lock = threading.Lock()
 
     def start(self) -> None:
-        sock_path = Path(SOCKET_PATH)
-        sock_path.parent.mkdir(parents=True, exist_ok=True)
-        if sock_path.exists():
-            sock_path.unlink()
+        import grp
+        try:
+            gid = grp.getgrnam("ghosttunnel").gr_gid
+        except KeyError:
+            logger.warning("Group 'ghosttunnel' not found. Using root GID.")
+            gid = 0
 
-        self._sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
-        self._sock.bind(str(sock_path))
-        # Set permissions immediately after bind — before listen() — to
-        # eliminate the TOCTOU window where the socket is world-accessible.
-        os.chmod(str(sock_path), _SOCKET_PERMS)
-        self._sock.listen(5)
-        self._sock.settimeout(1.0)   # allows clean shutdown
+        def bind_sock(path_str: str, perms: int) -> socket.socket:
+            p = Path(path_str)
+            p.parent.mkdir(parents=True, exist_ok=True)
+            if p.exists(): p.unlink()
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s.bind(path_str)
+            os.chmod(path_str, perms)
+            try:
+                os.chown(path_str, -1, gid)
+            except OSError:
+                pass
+            s.listen(5)
+            s.settimeout(1.0)
+            return s
+
+        self._ctrl_sock = bind_sock(CTRL_SOCKET_PATH, 0o660)
+        self._status_sock = bind_sock(STATUS_SOCKET_PATH, 0o664)
 
         self._running = True
-        self._thread = threading.Thread(
-            target=self._serve, daemon=True, name="ipc-server"
-        )
-        self._thread.start()
-        logger.info("IPC server listening at %s", SOCKET_PATH)
+        threading.Thread(target=self._serve_ctrl, daemon=True, name="ipc-ctrl").start()
+        threading.Thread(target=self._serve_status, daemon=True, name="ipc-status").start()
+        logger.info("IPC server listening. Ctrl: %s | Status: %s", CTRL_SOCKET_PATH, STATUS_SOCKET_PATH)
 
     def stop(self) -> None:
         self._running = False
-        if self._sock:
-            try:
-                self._sock.close()
-            except OSError:
-                pass
-        Path(SOCKET_PATH).unlink(missing_ok=True)
-        logger.info("IPC server stopped.")
+        for s in (self._ctrl_sock, self._status_sock):
+            if s:
+                try: s.close()
+                except OSError: pass
+        Path(CTRL_SOCKET_PATH).unlink(missing_ok=True)
+        Path(STATUS_SOCKET_PATH).unlink(missing_ok=True)
 
-    # ------------------------------------------------------------------
-    # Internal
-    # ------------------------------------------------------------------
+    def broadcast(self, data: dict) -> None:
+        payload = json.dumps(data).encode("utf-8") + b"\n"
+        with self._status_lock:
+            dead = []
+            for c in self._status_clients:
+                try:
+                    c.sendall(payload)
+                except OSError:
+                    dead.append(c)
+            for c in dead:
+                self._status_clients.remove(c)
+                try: c.close()
+                except OSError: pass
 
-    def _serve(self) -> None:
-        while self._running:
+    def _serve_status(self) -> None:
+        while self._running and self._status_sock:
             try:
-                conn, _ = self._sock.accept()  # type: ignore[union-attr]
+                conn, _ = self._status_sock.accept()
             except socket.timeout:
                 continue
             except OSError:
                 break
-            threading.Thread(
-                target=self._handle, args=(conn,), daemon=True
-            ).start()
+            with self._status_lock:
+                self._status_clients.append(conn)
+
+    def _serve_ctrl(self) -> None:
+        while self._running and self._ctrl_sock:
+            try:
+                conn, _ = self._ctrl_sock.accept()
+            except socket.timeout:
+                continue
+            except OSError:
+                break
+            threading.Thread(target=self._handle_ctrl, args=(conn,), daemon=True).start()
 
     @staticmethod
-    def _check_peer_uid(conn: socket.socket) -> bool:
-        """
-        SEC-IPC-01: Verify the connecting peer is UID 0 (root).
-        Uses SO_PEERCRED which is atomic on Linux — cannot be spoofed.
-        Returns True if authorized, False otherwise.
-        """
+    def _check_peer_gid(conn: socket.socket) -> bool:
         try:
-            # SO_PEERCRED returns struct { pid_t pid; uid_t uid; gid_t gid; }
+            import grp
             cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
-            _, uid, _ = struct.unpack("3i", cred)
-            return uid == 0
-        except (OSError, struct.error):
-            # If we cannot verify, deny by default (FAIL CLOSED principle)
+            _, peer_uid, peer_gid = struct.unpack("3i", cred)
+            if peer_uid == 0:
+                return True
+            gt_gid = grp.getgrnam("ghosttunnel").gr_gid
+            return peer_gid == gt_gid
+        except Exception:
             return False
 
-    def _handle(self, conn: socket.socket) -> None:
+    def _handle_ctrl(self, conn: socket.socket) -> None:
         try:
             with conn:
                 conn.settimeout(_CLIENT_TIMEOUT)
-
-                # SEC-IPC-01: Reject non-root connections immediately
-                if not self._check_peer_uid(conn):
-                    self._send(conn, {"ok": False, "error": "unauthorized: root required"})
-                    logger.warning("IPC: rejected connection from non-root peer.")
+                if not self._check_peer_gid(conn):
+                    self._send(conn, {"ok": False, "error": "unauthorized: ghosttunnel group required"})
                     return
-
-                # Read until newline to handle TCP stream fragmentation
                 raw = self._recv_line(conn)
-                if raw is None:
+                if not raw:
                     self._send(conn, {"ok": False, "error": "empty request"})
                     return
                 try:
@@ -135,41 +131,32 @@ class IpcServer:
                     self._send(conn, {"ok": False, "error": "invalid JSON"})
                     return
 
-                cmd = str(msg.get("cmd", ""))
-                handler = self.handlers.get(cmd)
+                action = str(msg.get("action", ""))
+                handler = self.handlers.get(action)
                 if not handler:
-                    self._send(conn, {"ok": False, "error": f"unknown command: {cmd}"})
+                    self._send(conn, {"ok": False, "error": f"unknown action: {action}"})
                     return
 
                 try:
                     result = handler()
                     self._send(conn, {"ok": True, **(result or {})})
                 except Exception as exc:
-                    logger.warning("IPC handler error for cmd=%s: %s", cmd, exc)
                     self._send(conn, {"ok": False, "error": "internal handler error"})
-        except Exception as exc:
-            logger.debug("IPC connection closed unexpectedly: %s", exc)
+        except Exception:
+            pass
 
     @staticmethod
     def _recv_line(conn: socket.socket) -> str | None:
-        """
-        Read from socket until a newline or the byte/chunk limits are reached.
-        _MAX_CHUNKS prevents a slow-loris style attack where an adversary sends
-        data 1 byte at a time to keep the handler thread busy indefinitely.
-        """
         buf = b""
         chunks = 0
         while len(buf) < _RECV_LIMIT and chunks < _MAX_CHUNKS:
             try:
                 chunk = conn.recv(min(256, _RECV_LIMIT - len(buf)))
-            except OSError:
-                break
-            if not chunk:
-                break
+            except OSError: break
+            if not chunk: break
             buf += chunk
             chunks += 1
-            if b"\n" in buf:
-                break
+            if b"\n" in buf: break
         text = buf.decode("utf-8", errors="replace").strip()
         return text if text else None
 
@@ -180,37 +167,26 @@ class IpcServer:
         except OSError:
             pass
 
-
-# ------------------------------------------------------------------
-# Client helper — used by ghostctl
-# ------------------------------------------------------------------
-
-def send_command(cmd: str, timeout: float = 5.0) -> dict:
-    """
-    Send a command to the running daemon via IPC socket.
-    Returns the parsed JSON response dict, or raises ConnectionRefusedError.
-    """
+def send_command(action: str, timeout: float = 5.0) -> dict:
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
         s.settimeout(timeout)
         try:
-            s.connect(SOCKET_PATH)
+            s.connect(CTRL_SOCKET_PATH)
         except FileNotFoundError:
-            raise ConnectionRefusedError("GhostTunnel daemon is not running (socket not found).")
-        # Send request terminated by newline so the server can detect end-of-message
-        s.sendall(json.dumps({"cmd": cmd}).encode("utf-8") + b"\n")
-        # Read response until newline
+            raise ConnectionRefusedError("GhostTunnel daemon is not running.")
+        payload = {"action": action, "payload": {}, "token": ""}
+        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
         buf = b""
         chunks = 0
         while len(buf) < _RECV_LIMIT and chunks < _MAX_CHUNKS:
-            chunk = s.recv(256)
-            if not chunk:
-                break
+            try: chunk = s.recv(256)
+            except OSError: break
+            if not chunk: break
             buf += chunk
             chunks += 1
-            if b"\n" in buf:
-                break
+            if b"\n" in buf: break
     raw = buf.decode("utf-8", errors="replace").strip()
     try:
         return json.loads(raw)
     except json.JSONDecodeError as exc:
-        raise ConnectionRefusedError(f"Daemon returned malformed response: {raw[:80]!r}") from exc
+        raise ConnectionRefusedError(f"Daemon returned malformed response.") from exc

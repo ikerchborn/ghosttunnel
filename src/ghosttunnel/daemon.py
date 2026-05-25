@@ -166,6 +166,9 @@ class GhostDaemon:
             )
             self._write_status_file(state)
             self._last_state = state
+            if signature != self._last_signature and self._ipc:
+                import time
+                self._ipc.broadcast({"event": "status_change", "state": asdict(state), "timestamp": time.time()})
             return state
 
         except Exception as e:
@@ -199,6 +202,9 @@ class GhostDaemon:
             )
             self._write_status_file(state)
             self._last_state = state
+            if signature != self._last_signature and self._ipc:
+                import time
+                self._ipc.broadcast({"event": "status_change", "state": asdict(state), "timestamp": time.time()})
             return state
 
     def disable(self) -> None:
@@ -232,6 +238,18 @@ class GhostDaemon:
         if self._last_state:
             return asdict(self._last_state)
         return {"mode": "unknown", "message": "No sync has completed yet."}
+
+    def _ipc_unlock_network(self) -> dict:
+        import threading
+        def _stop():
+            import time
+            time.sleep(0.5)
+            from ghosttunnel.core.emergency import PANIC_LOCK_PATH
+            Path(PANIC_LOCK_PATH).unlink(missing_ok=True)
+            self.firewall.deactivate()
+            self._running = False
+        threading.Thread(target=_stop).start()
+        return {"message": "Network unlocked. Daemon stopping."}
 
     # ------------------------------------------------------------------
     # PID file (LOW-04)
@@ -271,6 +289,7 @@ class GhostDaemon:
             "panic": self._ipc_panic,
             "panic-disable": self._ipc_panic_disable,
             "status": self._ipc_status,
+            "unlock-network": self._ipc_unlock_network,
         })
         self._ipc.start()
 

@@ -56,6 +56,13 @@ chmod 600 /etc/ghosttunnel/panic.rules
 chown root:root /etc/ghosttunnel/panic.rules
 
 # 4. Setup Systemd daemon
+echo "[*] Creating ghosttunnel group for IPC access..."
+groupadd -f ghosttunnel
+if [ -n "${SUDO_USER:-}" ]; then
+  usermod -aG ghosttunnel "$SUDO_USER" || true
+  echo "[!] IMPORTANT: You must log out and log in again for group permissions to take effect."
+fi
+
 echo "[*] Configuring Security Daemon in Systemd..."
 cp systemd/ghosttunnel.service /etc/systemd/system/
 chmod 644 /etc/systemd/system/ghosttunnel.service
