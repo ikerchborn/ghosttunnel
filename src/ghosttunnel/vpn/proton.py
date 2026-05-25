@@ -61,19 +61,27 @@ class ProtonVpnAdapter(VpnAdapter):
                 logger.debug("ProtonVPN tunnel detected: iface=%s ipv4=%s", name, info.ipv4)
                 break
 
-        # Detect native ProtonVPN kill switch interface
+        # Detect native ProtonVPN kill switch interface (pvpnksintrf0 = NM dummy black-hole route)
+        # ProtonVPN's KS is NetworkManager-based (routing), not nftables — so nft list chains
+        # will NOT show it. We detect it here by checking the interface list instead.
         native_ks_active = _PROTON_KS_IFACE in snapshot.interfaces
 
         if native_ks_active:
-            logger.info("ProtonVPN native kill switch interface (%s) detected. Coexisting.", _PROTON_KS_IFACE)
+            logger.info(
+                "ProtonVPN NM-based kill switch (%s) detected. "
+                "GhostTunnel will coexist using its own isolated ruleset.",
+                _PROTON_KS_IFACE,
+            )
 
         return VpnState(
             active=active,
             iface=iface_name,
             provider=self.name,
             proton_native_killswitch=native_ks_active,
-            conflict=native_ks_active,
-            conflict_reason="ProtonVPN native kill switch is active. Please disable it to use GhostTunnel." if native_ks_active else "",
+            # No conflict — GhostTunnel uses its own nftables table (inet ghosttunnel)
+            # which does NOT touch the NM routing/dummy-interface used by ProtonVPN.
+            conflict=False,
+            conflict_reason="",
         )
 
     def reconnect(self) -> bool:

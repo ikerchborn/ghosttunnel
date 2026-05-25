@@ -121,6 +121,9 @@ class GhostDaemon:
             if vpn_state.active and not vpn_state.is_leaking and not self.emergency.is_panic():
                 self.vpn_rotator.reset()
 
+            # Re-detect external KS on every cycle — Mullvad/ProtonVPN may start/stop
+            self.firewall._detect_external_ks()
+
             # Firewall Planning
             plan = self.firewall.build_plan(snapshot, vpn_state, self.emergency.is_panic())
 

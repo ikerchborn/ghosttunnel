@@ -21,7 +21,15 @@ class WireguardAdapter(VpnAdapter):
 
     def get_state(self, snapshot: NetworkSnapshot) -> VpnState:
         for name, info in snapshot.interfaces.items():
-            if not (name.startswith("wg") or name.startswith("mullvad") or name.startswith("nordlynx")):
+            # Mullvad: wg0-mullvad, wg1-mullvad (suffix), or mullvad-XXXX (prefix)
+            # NordVPN: nordlynx (WG), nordtun (OpenVPN legacy)
+            if not (
+                name.startswith("wg")
+                or name.startswith("mullvad")
+                or name.endswith("-mullvad")
+                or name.startswith("nordlynx")
+                or name.startswith("nordtun")
+            ):
                 continue
 
             # (MED-05) WireGuard interfaces report UNKNOWN operstate by design.

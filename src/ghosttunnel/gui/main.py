@@ -326,14 +326,14 @@ class MainWindow(QMainWindow):
 
         self._s = {}
         fields = [
-            ("mode",            "Current Mode",        0, 0),
-            ("panic_mode",      "Panic Active",        0, 2),
-            ("vpn_provider",    "VPN Provider",        1, 0),
-            ("vpn_iface",       "Tunnel Interface",    1, 2),
-            ("firewall_active", "Firewall Active",     2, 0),
-            ("route_probe",     "Route Probe Iface",   2, 2),
-            ("physical_ifaces", "Physical Interfaces", 3, 0),
-            ("dns_servers",     "DNS Servers",         3, 2),
+            ("mode",                     "Current Mode",           0, 0),
+            ("panic_mode",               "Panic Active",           0, 2),
+            ("vpn_provider",             "VPN Provider",           1, 0),
+            ("vpn_iface",                "Tunnel Interface",       1, 2),
+            ("firewall_active",          "Firewall Active",        2, 0),
+            ("proton_native_killswitch", "ProtonVPN KS Coexist",   2, 2),
+            ("physical_ifaces",          "Physical Interfaces",    3, 0),
+            ("dns_servers",              "DNS Servers",            3, 2),
         ]
         for key, label, row, col in fields:
             lbl = QLabel(label + ":")
@@ -343,8 +343,6 @@ class MainWindow(QMainWindow):
             val.setWordWrap(True)
             sg.addWidget(lbl, row, col)
             sg.addWidget(val, row, col + 1)
-            self._s[key] = val
-
             self._s[key] = val
 
         # ── Controls ──────────────────────────────────────────────
@@ -461,7 +459,14 @@ class MainWindow(QMainWindow):
             "color: #00ff41; font-weight: 700;" if fw else "color: #ff003c; font-weight: 700;"
         )
 
-        self._s["route_probe"].setText(data.get("route_probe_iface") or "—")
+        pks = data.get("proton_native_killswitch", False)
+        if pks:
+            self._s["proton_native_killswitch"].setText("🟡 COEXISTING")
+            self._s["proton_native_killswitch"].setStyleSheet("color: #ffaa00; font-weight: 700;")
+        else:
+            self._s["proton_native_killswitch"].setText("🟢 NONE")
+            self._s["proton_native_killswitch"].setStyleSheet("color: #00ff41; font-weight: 700;")
+
         self._s["physical_ifaces"].setText(
             ", ".join(data.get("physical_ifaces", [])) or "—"
         )

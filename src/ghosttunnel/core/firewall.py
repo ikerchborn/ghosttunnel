@@ -45,14 +45,39 @@ class NftFirewallManager:
         self.settings = settings
         self.table_ref = f"inet {self.settings.table_name}"
         self.external_ks_active = False
+        self._detect_external_ks()
+
+    def _detect_external_ks(self, vpn_state=None) -> None:
+        """
+        Detect whether an external VPN kill switch is present that GhostTunnel
+        must coexist with by injecting isolated chains instead of its own table.
+
+        Detection strategy (in order):
+        1. nftables: scan for 'table inet mullvad' (Mullvad's nftables-native KS)
+        2. nftables: scan for any chain containing 'pvpn' (ProtonVPN nftables mode,
+           rare in modern versions but present in some distros)
+        3. VPN state: if proton_native_killswitch is True (pvpnksintrf0 present),
+           ProtonVPN is using its NM-routing KS — GhostTunnel can use its own
+           table since there is no nftables collision, so we do NOT set
+           external_ks_active in that case.
+        """
+        was_active = self.external_ks_active
+        self.external_ks_active = False
         try:
-            res = run([self.nft, "list", "chains"], check=False)
-            stdout_lower = res.stdout.lower()
-            if "pvpn" in stdout_lower or "mullvad" in stdout_lower:
+            res = run([self.nft, "list", "ruleset"], check=False)
+            ruleset = res.stdout.lower()
+            # Mullvad uses 'table inet mullvad'
+            if "table inet mullvad" in ruleset:
                 self.external_ks_active = True
-                logger.info("External killswitch detected. GhostTunnel will use isolated chain GHOSTTUNNEL_KS.")
+                logger.info("Mullvad nftables kill switch detected (table inet mullvad).")
+            # ProtonVPN nftables mode (legacy / distro-specific builds)
+            elif "pvpn" in ruleset:
+                self.external_ks_active = True
+                logger.info("ProtonVPN nftables kill switch detected.")
         except Exception:
             pass
+        if was_active != self.external_ks_active:
+            logger.info("external_ks_active changed: %s -> %s", was_active, self.external_ks_active)
 
     @property
     def nft(self) -> str:
