@@ -47,7 +47,8 @@ class NftFirewallManager:
         self.external_ks_active = False
         try:
             res = run([self.nft, "list", "chains"], check=False)
-            if "PVPN" in res.stdout or "pvpn" in res.stdout or "pvpn-killswitch" in res.stdout:
+            stdout_lower = res.stdout.lower()
+            if "pvpn" in stdout_lower or "mullvad" in stdout_lower:
                 self.external_ks_active = True
                 logger.info("External killswitch detected. GhostTunnel will use isolated chain GHOSTTUNNEL_KS.")
         except Exception:
@@ -414,6 +415,8 @@ table inet {table} {{
             run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_IN"], check=False)
             run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_OUT"], check=False)
             run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_FWD"], check=False)
+            for s in ("lan_ipv4", "bootstrap_dns_v4", "lan_ipv6", "bootstrap_dns_v6", "vpn_endpoints_v4", "vpn_endpoints_v6"):
+                run([self.nft, "delete", "set", "inet", "filter", s], check=False)
         else:
             run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
 

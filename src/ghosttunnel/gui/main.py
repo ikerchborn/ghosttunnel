@@ -22,8 +22,6 @@ from __future__ import annotations
 
 import json
 import logging
-import os
-import subprocess
 import sys
 import threading
 from datetime import datetime
@@ -33,7 +31,6 @@ from ghosttunnel.core.config import Settings
 
 try:
     from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
-    from PyQt6.QtGui import QFont, QColor, QIcon
     from PyQt6.QtWidgets import (
         QApplication,
         QCheckBox,
@@ -46,10 +43,7 @@ try:
         QPlainTextEdit,
         QVBoxLayout,
         QWidget,
-        QFrame,
         QGroupBox,
-        QSizePolicy,
-        QScrollArea,
     )
 except ImportError as exc:
     raise RuntimeError(
@@ -182,7 +176,7 @@ _MODE_COLORS = {
 }
 
 # Allowlist of subcommands the GUI is allowed to invoke (injection prevention)
-ALLOWED_SUBCOMMANDS = frozenset({"panic", "panic-disable", "unlock-network"})
+ALLOWED_SUBCOMMANDS = frozenset({"panic", "panic-disable", "unlock-network", "save-config"})
 
 
 # ------------------------------------------------------------------
@@ -247,6 +241,23 @@ class IpcWorker(QThread):
         self._wake.set()  # Unblock the wait so the thread can exit
         self.quit()
         self.wait(2000)
+
+class IpcControlWorker(QThread):
+    command_finished = pyqtSignal(dict)
+    command_failed = pyqtSignal(str)
+
+    def __init__(self, action: str, payload: dict | None = None, parent=None):
+        super().__init__(parent)
+        self.action = action
+        self.payload = payload or {}
+
+    def run(self):
+        from ghosttunnel.core.ipc import send_command
+        try:
+            resp = send_command(self.action, self.payload)
+            self.command_finished.emit(resp)
+        except Exception as e:
+            self.command_failed.emit(str(e))
 
 
 # ------------------------------------------------------------------
@@ -402,13 +413,8 @@ class MainWindow(QMainWindow):
         btn_save.setObjectName("SaveBtn")
         btn_save.clicked.connect(self._save_config)
         cfg_grid.addWidget(btn_save, 3, 0, 1, 2)
-
-        # BUG-GUI-09: Disable config saving if not root, to avoid showing default values and confusing user
-        if os.geteuid() != 0:
-            cfg_box.setTitle("Configuration (READ-ONLY: Root Required)")
-            cfg_box.setEnabled(False)
-            btn_save.setText("Restart GUI as Root to Edit Config")
-            btn_save.setEnabled(False)
+        
+        self._active_workers: list[IpcControlWorker] = []
 
         # ── Activity Log ──────────────────────────────────────────
         log_box = QGroupBox("Activity Log")
@@ -484,24 +490,37 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
     # Privileged actions via IPC (direct to socket)
     # ------------------------------------------------------------------
-    def _run_privileged(self, subcommand: str) -> bool:
-        from ghosttunnel.core.ipc import send_command
+    def _run_privileged(self, subcommand: str, payload: dict | None = None) -> None:
         self._log(f"→ Sending command: {subcommand}")
-        try:
-            resp = send_command(subcommand)
-            if resp.get("ok"):
-                msg = resp.get("message", "Success")
-                self._log(f"✓ {msg}")
-                return True
-            else:
-                msg = resp.get("error", "Unknown error")
-                self._log(f"✗ Error: {msg}")
-                QMessageBox.critical(self, "Command Failed", msg)
-                return False
-        except Exception as e:
-            self._log(f"✗ IPC Error: {e}")
-            QMessageBox.critical(self, "Connection Error", str(e))
-            return False
+        for btn in (self.btn_panic, self.btn_disable_panic, self.btn_unlock):
+            btn.setEnabled(False)
+            
+        worker = IpcControlWorker(subcommand, payload, self)
+        worker.command_finished.connect(lambda resp, w=worker: self._on_command_finished(resp, w))
+        worker.command_failed.connect(lambda err, w=worker: self._on_command_failed(err, w))
+        worker.start()
+        self._active_workers.append(worker)
+
+    def _on_command_finished(self, resp: dict, worker: IpcControlWorker) -> None:
+        if resp.get("ok"):
+            msg = resp.get("message", "Success")
+            self._log(f"✓ {msg}")
+        else:
+            msg = resp.get("error", "Unknown error")
+            self._log(f"✗ Error: {msg}")
+            QMessageBox.critical(self, "Command Failed", msg)
+        self._cleanup_worker(worker)
+
+    def _on_command_failed(self, err: str, worker: IpcControlWorker) -> None:
+        self._log(f"✗ IPC Error: {err}")
+        QMessageBox.critical(self, "Connection Error", err)
+        self._cleanup_worker(worker)
+
+    def _cleanup_worker(self, worker: IpcControlWorker) -> None:
+        for btn in (self.btn_panic, self.btn_disable_panic, self.btn_unlock):
+            btn.setEnabled(True)
+        if worker in self._active_workers:
+            self._active_workers.remove(worker)
 
     def _action_panic(self) -> None:
         reply = QMessageBox.question(
@@ -539,34 +558,15 @@ class MainWindow(QMainWindow):
         self.settings.ipv6_block = self.chk_ipv6.isChecked()
         self.settings.auto_rotate = self.chk_auto_rotate.isChecked()
 
-        # Try direct save first (works if running as root)
-        if os.geteuid() == 0:
-            try:
-                self.settings.save()
-                self._log("✓ Configuration saved to /etc/ghosttunnel/config.json")
-                self._log("  ↻ Restart daemon for changes to take effect: sudo systemctl restart ghosttunnel")
-                QMessageBox.information(
-                    self, "Saved",
-                    "Configuration saved.\n\n"
-                    "Restart the daemon for changes to take effect:\n"
-                    "  sudo systemctl restart ghosttunnel"
-                )
-                return
-            except Exception as exc:
-                self._log(f"✗ Save failed: {exc}")
-                QMessageBox.critical(self, "Save Failed", str(exc))
-                return
-
-        # Non-root: inform user to save via CLI
-        QMessageBox.information(
-            self, "Save Config",
-            "Config saving from the GUI requires root privileges.\n\n"
-            "To save settings, run:\n"
-            "  sudo ghostctl status\n\n"
-            "Or restart the GUI with root:\n"
-            "  sudo ghostgui",
-        )
-        self._log("⚠ Config save skipped — GUI needs root to write /etc/ghosttunnel/config.json")
+        payload = {
+            "allow_lan": self.settings.allow_lan,
+            "allow_forwarding": self.settings.allow_forwarding,
+            "stealth_mode": self.settings.stealth_mode,
+            "trust_local_dns": self.settings.trust_local_dns,
+            "ipv6_block": self.settings.ipv6_block,
+            "auto_rotate": self.settings.auto_rotate,
+        }
+        self._run_privileged("save-config", payload)
 
     # ------------------------------------------------------------------
     # Log helper

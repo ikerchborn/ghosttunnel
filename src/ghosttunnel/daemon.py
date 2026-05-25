@@ -68,7 +68,7 @@ class GhostDaemon:
         self.emergency = EmergencyController()
 
         self._running = False
-        self._last_signature = None
+        self._last_signature: str | None = None
         self._ipc: IpcServer | None = None
         self._last_state: ControllerState | None = None
 
@@ -224,22 +224,23 @@ class GhostDaemon:
     # ------------------------------------------------------------------
     # IPC handlers (CRIT-04)
     # ------------------------------------------------------------------
-    def _ipc_panic(self) -> dict:
+    def _ipc_panic(self, payload: dict) -> dict:
         self.trigger_panic()
         return {"mode": "panic", "message": "Panic mode engaged."}
 
-    def _ipc_panic_disable(self) -> dict:
+    def _ipc_panic_disable(self, payload: dict) -> dict:
         self.emergency.disable_panic()
         self._last_signature = None  # force re-evaluation
         self.sync()  # Apply new rules immediately (matches _ipc_panic behavior)
         return {"message": "Panic mode disabled. Firewall rules updated."}
 
-    def _ipc_status(self) -> dict:
+    def _ipc_status(self, payload: dict) -> dict:
         if self._last_state:
+            from dataclasses import asdict
             return asdict(self._last_state)
         return {"mode": "unknown", "message": "No sync has completed yet."}
 
-    def _ipc_unlock_network(self) -> dict:
+    def _ipc_unlock_network(self, payload: dict) -> dict:
         import threading
         def _stop():
             import time
@@ -250,6 +251,16 @@ class GhostDaemon:
             self._running = False
         threading.Thread(target=_stop).start()
         return {"message": "Network unlocked. Daemon stopping."}
+
+    def _ipc_save_config(self, payload: dict) -> dict:
+        for k, v in payload.items():
+            if hasattr(self.settings, k):
+                setattr(self.settings, k, v)
+        try:
+            self.settings.save()
+            return {"message": "Configuration saved to /etc/ghosttunnel/config.json"}
+        except Exception as e:
+            return {"error": str(e)}
 
     # ------------------------------------------------------------------
     # PID file (LOW-04)
@@ -290,6 +301,7 @@ class GhostDaemon:
             "panic-disable": self._ipc_panic_disable,
             "status": self._ipc_status,
             "unlock-network": self._ipc_unlock_network,
+            "save-config": self._ipc_save_config,
         })
         self._ipc.start()
 

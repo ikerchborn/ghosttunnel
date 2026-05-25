@@ -40,9 +40,20 @@ done
 
 if [ -n "$NFT_BIN" ]; then
     "$NFT_BIN" delete table inet ghosttunnel 2>/dev/null || true
+    # Delete injected external chains
+    "$NFT_BIN" delete chain inet filter GHOSTTUNNEL_KS_IN 2>/dev/null || true
+    "$NFT_BIN" delete chain inet filter GHOSTTUNNEL_KS_OUT 2>/dev/null || true
+    "$NFT_BIN" delete chain inet filter GHOSTTUNNEL_KS_FWD 2>/dev/null || true
+    # Delete injected sets
+    for s in lan_ipv4 bootstrap_dns_v4 lan_ipv6 bootstrap_dns_v6 vpn_endpoints_v4 vpn_endpoints_v6; do
+        "$NFT_BIN" delete set inet filter "$s" 2>/dev/null || true
+    done
 else
     echo "[!] nft binary not found — manual flush required:"
     echo "    nft delete table inet ghosttunnel"
+    echo "    nft delete chain inet filter GHOSTTUNNEL_KS_IN"
+    echo "    nft delete chain inet filter GHOSTTUNNEL_KS_OUT"
+    echo "    nft delete chain inet filter GHOSTTUNNEL_KS_FWD"
 fi
 
 echo "[*] Restoring DNS if necessary..."

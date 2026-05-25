@@ -51,3 +51,12 @@ addopts   = "-v --tb=short"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src/ghosttunnel"]
+
+[tool.mypy]
+python_version = "3.12"
+warn_return_any = false
+ignore_missing_imports = false
+
+[[tool.mypy.overrides]]
+module = ["PyQt6.*"]
+ignore_missing_imports = true

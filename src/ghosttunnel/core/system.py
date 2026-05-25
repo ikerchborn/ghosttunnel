@@ -79,7 +79,8 @@ def sanitize_table_name(name: str) -> str:
 # Root check
 # ------------------------------------------------------------------
 def require_root() -> None:
-    if os.geteuid() != 0:
+    import sys
+    if sys.platform != 'win32' and os.geteuid() != 0:  # type: ignore
         raise PermissionError("This command must run as root.")
 
 

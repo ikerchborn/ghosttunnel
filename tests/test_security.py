@@ -511,7 +511,9 @@ class TestGuiSubcommandAllowlist:
 # IPC — protocol validation
 # =====================================================================
 class TestIpcProtocol:
-    def test_send_command_raises_on_malformed_response(self):
+    import sys
+    @pytest.mark.skipif(sys.platform == 'win32', reason="AF_UNIX not available on Windows")
+    def test_send_command_raises_on_malformed_response(self, tmp_path):
         """send_command() must raise ConnectionRefusedError if daemon returns garbage."""
         from ghosttunnel.core.ipc import send_command
 
@@ -550,6 +552,8 @@ class TestIpcProtocol:
             except OSError:
                 pass
 
+    import sys
+    @pytest.mark.skipif(sys.platform == 'win32', reason="AF_UNIX not available on Windows")
     def test_send_command_raises_when_socket_not_found(self):
         """send_command() raises ConnectionRefusedError when socket file doesn't exist."""
         from ghosttunnel.core.ipc import send_command

@@ -18,7 +18,7 @@ _CLIENT_TIMEOUT = 5.0
 _MAX_CHUNKS = 64
 
 class IpcServer:
-    def __init__(self, handlers: dict[str, Callable[[], dict]]) -> None:
+    def __init__(self, handlers: dict[str, Callable[[dict], dict]]) -> None:
         self.handlers = handlers
         self._ctrl_sock: socket.socket | None = None
         self._status_sock: socket.socket | None = None
@@ -29,7 +29,7 @@ class IpcServer:
     def start(self) -> None:
         import grp
         try:
-            gid = grp.getgrnam("ghosttunnel").gr_gid
+            gid = grp.getgrnam("ghosttunnel").gr_gid  # type: ignore
         except KeyError:
             logger.warning("Group 'ghosttunnel' not found. Using root GID.")
             gid = 0
@@ -38,11 +38,11 @@ class IpcServer:
             p = Path(path_str)
             p.parent.mkdir(parents=True, exist_ok=True)
             if p.exists(): p.unlink()
-            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+            s = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)  # type: ignore
             s.bind(path_str)
             os.chmod(path_str, perms)
             try:
-                os.chown(path_str, -1, gid)
+                os.chown(path_str, -1, gid)  # type: ignore
             except OSError:
                 pass
             s.listen(5)
@@ -105,11 +105,11 @@ class IpcServer:
     def _check_peer_gid(conn: socket.socket) -> bool:
         try:
             import grp
-            cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))
+            cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))  # type: ignore
             _, peer_uid, peer_gid = struct.unpack("3i", cred)
             if peer_uid == 0:
                 return True
-            gt_gid = grp.getgrnam("ghosttunnel").gr_gid
+            gt_gid = grp.getgrnam("ghosttunnel").gr_gid  # type: ignore
             return peer_gid == gt_gid
         except Exception:
             return False
@@ -138,7 +138,8 @@ class IpcServer:
                     return
 
                 try:
-                    result = handler()
+                    payload = msg.get("payload", {})
+                    result = handler(payload)
                     self._send(conn, {"ok": True, **(result or {})})
                 except Exception as exc:
                     self._send(conn, {"ok": False, "error": "internal handler error"})
@@ -167,15 +168,15 @@ class IpcServer:
         except OSError:
             pass
 
-def send_command(action: str, timeout: float = 5.0) -> dict:
-    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:
+def send_command(action: str, payload: dict | None = None, timeout: float = 5.0) -> dict:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:  # type: ignore
         s.settimeout(timeout)
         try:
             s.connect(CTRL_SOCKET_PATH)
         except FileNotFoundError:
             raise ConnectionRefusedError("GhostTunnel daemon is not running.")
-        payload = {"action": action, "payload": {}, "token": ""}
-        s.sendall(json.dumps(payload).encode("utf-8") + b"\n")
+        msg = {"action": action, "payload": payload or {}, "token": ""}
+        s.sendall(json.dumps(msg).encode("utf-8") + b"\n")
         buf = b""
         chunks = 0
         while len(buf) < _RECV_LIMIT and chunks < _MAX_CHUNKS:
