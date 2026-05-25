@@ -503,8 +503,9 @@ class TestGuiSubcommandAllowlist:
             assert "panic" in allowed
             assert "panic-disable" in allowed
             assert "unlock-network" in allowed
+            assert "save-config" in allowed
             assert "rm -rf /" not in allowed
-            assert len(allowed) == 3, "Allowlist should contain exactly 3 entries"
+            assert len(allowed) == 4, "Allowlist should contain exactly 4 entries"
 
 
 # =====================================================================
