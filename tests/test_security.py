@@ -537,13 +537,13 @@ class TestIpcProtocol:
         t.start()
 
         import ghosttunnel.core.ipc as ipc_mod
-        original = ipc_mod.SOCKET_PATH
-        ipc_mod.SOCKET_PATH = tmp_path
+        original = ipc_mod.CTRL_SOCKET_PATH
+        ipc_mod.CTRL_SOCKET_PATH = tmp_path
         try:
             with pytest.raises(ConnectionRefusedError):
                 send_command("status")
         finally:
-            ipc_mod.SOCKET_PATH = original
+            ipc_mod.CTRL_SOCKET_PATH = original
             t.join(timeout=2)
             try:
                 os.unlink(tmp_path)
@@ -554,13 +554,13 @@ class TestIpcProtocol:
         """send_command() raises ConnectionRefusedError when socket file doesn't exist."""
         from ghosttunnel.core.ipc import send_command
         import ghosttunnel.core.ipc as ipc_mod
-        original = ipc_mod.SOCKET_PATH
-        ipc_mod.SOCKET_PATH = "/tmp/ghosttunnel_nonexistent_sock_test.sock"
+        original = ipc_mod.CTRL_SOCKET_PATH
+        ipc_mod.CTRL_SOCKET_PATH = "/tmp/ghosttunnel_nonexistent_sock_test.sock"
         try:
             with pytest.raises(ConnectionRefusedError):
                 send_command("status")
         finally:
-            ipc_mod.SOCKET_PATH = original
+            ipc_mod.CTRL_SOCKET_PATH = original
 
 
 # =====================================================================
