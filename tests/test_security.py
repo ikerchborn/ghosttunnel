@@ -743,7 +743,7 @@ class TestCorePublicMethods:
         fw = NftFirewallManager(s)
         snap = NetworkSnapshot(interfaces={}, default_route_iface=None)
         vpn = VpnState(active=True, iface="wg0", provider="mullvad")
-        plan = fw.build_plan(snap, vpn, panic=False)
+        plan = fw.build_plan(snap, vpn, panic_mode=False)
         assert isinstance(plan, FirewallPlan)
         monkeypatch.setattr("ghosttunnel.core.firewall.require_root", lambda: None)
         fw.activate(plan)
