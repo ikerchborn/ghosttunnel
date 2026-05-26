@@ -140,8 +140,8 @@ class IpcServer:
                 return True
             gt_gid = grp.getgrnam("ghosttunnel").gr_gid  # type: ignore
             return peer_gid == gt_gid
-        except Exception as exc:
-            logger.debug("Failed checking peer credentials: %s", exc)
+        except Exception:
+            logger.debug("Failed checking peer credentials")
             return False
 
     def _handle_ctrl(self, conn: socket.socket) -> None:

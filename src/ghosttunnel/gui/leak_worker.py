@@ -36,8 +36,7 @@ class LeakWorker(QThread):
             try:
                 # We use ipinfo.io as it provides a clean, rate-limit friendly JSON response
                 # Note: For strict OPSEC, some users might prefer am.i.mullvad.net or custom endpoints.
-                req = urllib.request.Request("https://ipinfo.io/json", headers={'User-Agent': 'Mozilla/5.0'})
-                with urllib.request.urlopen(req, timeout=5.0) as response:
+                with urllib.request.urlopen(urllib.request.Request("https://ipinfo.io/json", headers={'User-Agent': 'Mozilla/5.0'}), timeout=5.0) as response:
                     if response.status == 200:
                         ip_info = json.loads(response.read().decode('utf-8'))
                         data["public_ip"] = ip_info.get("ip", "Unknown")

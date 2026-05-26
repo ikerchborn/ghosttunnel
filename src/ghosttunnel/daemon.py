@@ -54,7 +54,7 @@ def _ensure_runtime_dir() -> None:
     path.mkdir(parents=True, exist_ok=True)
     try:
         # 0o755: root rwx, rx everyone (so gui can read status.json)
-        os.chmod(str(path), 0o755)
+        os.chmod(str(path), 0o755)  # nosemgrep: python.lang.security.audit.insecure-file-permissions.insecure-file-permissions
     except OSError:
         pass  # Already exists with correct perms from systemd RuntimeDirectory
 
