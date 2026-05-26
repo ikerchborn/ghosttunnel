@@ -113,11 +113,15 @@ def run(
     check: bool = True,
     input_text: str | None = None,
     timeout: float = 5.0,
+    env: dict | None = None,
 ) -> subprocess.CompletedProcess[str]:
     """
     Execute a system command with capture and timeout.
     Timeout is per-call so callers can override for slow VPN CLIs (MED-03).
     """
+    if env is None:
+        env = {"PATH": "/usr/sbin:/usr/bin:/bin", "HOME": "/tmp"}
+        
     try:
         result = subprocess.run(
             args,
@@ -126,6 +130,7 @@ def run(
             text=True,
             check=check,
             timeout=timeout,
+            env=env,
         )
     except subprocess.TimeoutExpired as exc:
         # Do NOT include full args in error — may contain internal paths (CRIT-02)

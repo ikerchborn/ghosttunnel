@@ -33,6 +33,7 @@ dev = [
   "flake8>=7.0",
   "bandit>=1.8",
   "pyinstaller>=6.0",
+  "pyrefly>=1.0.0",
 ]
 
 [project.scripts]
@@ -52,11 +53,10 @@ addopts   = "-v --tb=short"
 [tool.hatch.build.targets.wheel]
 packages = ["src/ghosttunnel"]
 
-[tool.mypy]
+[tool.pyrefly]
 python_version = "3.12"
-warn_return_any = false
-ignore_missing_imports = false
+strict = true
 
-[[tool.mypy.overrides]]
+[[tool.pyrefly.overrides]]
 module = ["PyQt6.*"]
 ignore_missing_imports = true

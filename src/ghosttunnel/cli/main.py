@@ -212,6 +212,7 @@ def show_logs() -> None:
             ["/usr/bin/journalctl", "-u", "ghosttunnel", "-f", "--no-pager"],
             check=False,
             timeout=10,
+            env={"PATH": "/usr/bin:/bin", "HOME": "/tmp"},
         )
     except KeyboardInterrupt:
         pass
