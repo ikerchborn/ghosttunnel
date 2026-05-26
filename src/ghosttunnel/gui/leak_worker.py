@@ -1,6 +1,5 @@
 import json
 import logging
-import re
 import urllib.request
 import urllib.error
 from pathlib import Path
@@ -24,7 +23,7 @@ class LeakWorker(QThread):
         self.interval_ms = interval_ms
         self._running = True
 
-    def run(self):
+    def run(self) -> None:
         while self._running:
             data = {
                 "public_ip": "Unknown",
@@ -73,7 +72,7 @@ class LeakWorker(QThread):
                 self.msleep(100)
                 slept += 100
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
         self.quit()
         self.wait(2000)

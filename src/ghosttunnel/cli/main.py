@@ -23,6 +23,7 @@ logger = logging.getLogger(__name__)
 
 
 def build_parser() -> argparse.ArgumentParser:
+    """Build and return the argument parser for the ghostctl command line."""
     parser = argparse.ArgumentParser(
         description="GhostTunnel — Advanced VPN Kill Switch & OPSEC CLI",
         formatter_class=argparse.RawDescriptionHelpFormatter,
@@ -59,8 +60,8 @@ def status(settings: Settings) -> None:
         ipc_ok = True
         _print_status(resp, source="daemon-ipc")
         return
-    except (ConnectionRefusedError, OSError, TimeoutError):
-        pass
+    except (ConnectionRefusedError, OSError, TimeoutError) as e:
+        logger.error("IPC communication failed: %s", e)
 
     # Fallback: read static file
     path = Path(settings.status_path)
@@ -177,10 +178,8 @@ def unlock_network() -> None:
         except (CommandError, subprocess.CalledProcessError) as exc:
             print(f"[!] Error running recovery script: {exc}")
     else:
-        settings = Settings.load()
-        nft = find_binary("nft")
-        teardown = f"table inet {settings.table_name}\ndelete table inet {settings.table_name}"
-        run([nft, "-f", "-"], input_text=teardown, check=False)
+        print(f"[!] Critical: Recovery script not found at {recover_bin}.")
+        print("    Please run the recover script manually or restart your network manager.")
 
     # Remove panic lock so the daemon doesn't re-enter panic on next start
     from ghosttunnel.core.emergency import PANIC_LOCK_PATH
@@ -212,6 +211,7 @@ def show_logs() -> None:
         subprocess.run(
             ["/usr/bin/journalctl", "-u", "ghosttunnel", "-f", "--no-pager"],
             check=False,
+            timeout=10,
         )
     except KeyboardInterrupt:
         pass
@@ -221,6 +221,7 @@ def show_logs() -> None:
 
 
 def main() -> None:
+    """Main entrypoint for the CLI."""
     parser = build_parser()
     args = parser.parse_args()
     settings = Settings.load()

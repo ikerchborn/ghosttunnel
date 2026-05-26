@@ -193,7 +193,6 @@ class GhostDaemon:
             self._write_status_file(state)
             self._last_state = state
             if signature != self._last_signature and self._ipc:
-                import time
                 self._ipc.broadcast({"event": "status_change", "state": asdict(state), "timestamp": time.time()})
             return state
 
@@ -229,7 +228,6 @@ class GhostDaemon:
             self._write_status_file(state)
             self._last_state = state
             if signature != self._last_signature and self._ipc:
-                import time
                 self._ipc.broadcast({"event": "status_change", "state": asdict(state), "timestamp": time.time()})
             return state
 
@@ -271,7 +269,6 @@ class GhostDaemon:
         Returns the last synchronized state.
         """
         if self._last_state:
-            from dataclasses import asdict
             return asdict(self._last_state)
         return {"mode": "unknown", "message": "No sync has completed yet."}
 
@@ -281,7 +278,6 @@ class GhostDaemon:
         """
         import threading
         def _stop() -> None:
-            import time
             time.sleep(0.5)
             from ghosttunnel.core.emergency import PANIC_LOCK_PATH
             Path(PANIC_LOCK_PATH).unlink(missing_ok=True)
@@ -330,7 +326,7 @@ class GhostDaemon:
         except OSError:
             pass
 
-    def run(self):
+    def run(self) -> None:
         logger.info("Starting GhostTunnel Daemon v1.0.0...")
         self._running = True
 

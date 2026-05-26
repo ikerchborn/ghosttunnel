@@ -22,7 +22,7 @@ class TrafficWorker(QThread):
         self._last_stats = {}
         self._last_time = 0.0
 
-    def run(self):
+    def run(self) -> None:
         while self._running:
             current_time = time.time()
             current_stats = self._read_net_dev()
@@ -78,7 +78,7 @@ class TrafficWorker(QThread):
             logger.debug(f"Failed to read /proc/net/dev: {e}")
         return stats
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
         self.quit()
         self.wait(2000)

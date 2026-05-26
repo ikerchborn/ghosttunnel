@@ -43,8 +43,8 @@ class IpcServer:
             os.chmod(path_str, perms)
             try:
                 os.chown(path_str, -1, gid)  # type: ignore
-            except OSError:
-                pass
+            except OSError as exc:
+                logger.warning("Failed to chown socket %s: %s", path_str, exc)
             s.listen(5)
             s.settimeout(1.0)
             return s
@@ -61,8 +61,7 @@ class IpcServer:
         self._running = False
         for s in (self._ctrl_sock, self._status_sock):
             if s:
-                try: s.close()
-                except OSError: pass
+                except OSError as exc: logger.warning("Error closing socket: %s", exc)
         Path(CTRL_SOCKET_PATH).unlink(missing_ok=True)
         Path(STATUS_SOCKET_PATH).unlink(missing_ok=True)
 
@@ -78,7 +77,7 @@ class IpcServer:
             for c in dead:
                 self._status_clients.remove(c)
                 try: c.close()
-                except OSError: pass
+                except OSError as exc: logger.warning("Error closing dead client: %s", exc)
 
     def _serve_status(self) -> None:
         """
@@ -98,15 +97,15 @@ class IpcServer:
                 if not self._check_peer_gid(conn):
                     try:
                         conn.close()
-                    except OSError:
-                        pass
+                    except OSError as exc:
+                        logger.warning("Error closing unauthorized client: %s", exc)
                     continue
             except Exception as exc:
                 logger.error("Error configuring status socket client: %s", exc)
                 try:
                     conn.close()
-                except OSError:
-                    pass
+                except OSError as exc:
+                    logger.warning("Error closing client on exception: %s", exc)
                 continue
 
             with self._status_lock:
@@ -205,18 +204,22 @@ class IpcServer:
     def _send(conn: socket.socket, data: dict) -> None:
         try:
             conn.sendall(json.dumps(data).encode("utf-8") + b"\n")
-        except OSError:
-            pass
+        except OSError as exc:
+            logger.warning("Error sending data to client: %s", exc)
 
 def send_command(action: str, payload: dict | None = None, timeout: float = 5.0) -> dict:
+    """Send a command to the daemon via the control Unix socket."""
     with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as s:  # type: ignore
         s.settimeout(timeout)
         try:
             s.connect(CTRL_SOCKET_PATH)
-        except FileNotFoundError:
-            raise ConnectionRefusedError("GhostTunnel daemon is not running.")
+        except (FileNotFoundError, ConnectionError) as exc:
+            raise ConnectionRefusedError(f"GhostTunnel daemon is not reachable: {exc}") from exc
         msg = {"action": action, "payload": payload or {}, "token": ""}
-        s.sendall(json.dumps(msg).encode("utf-8") + b"\n")
+        try:
+            s.sendall(json.dumps(msg).encode("utf-8") + b"\n")
+        except (OSError, ConnectionError) as exc:
+            raise ConnectionRefusedError(f"Failed to send IPC command: {exc}") from exc
         buf = b""
         chunks = 0
         while len(buf) < _RECV_LIMIT and chunks < _MAX_CHUNKS:

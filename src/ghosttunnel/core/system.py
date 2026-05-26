@@ -124,14 +124,17 @@ def run(
             input=input_text,
             capture_output=True,
             text=True,
-            check=False,
+            check=check,
             timeout=timeout,
         )
     except subprocess.TimeoutExpired as exc:
         # Do NOT include full args in error — may contain internal paths (CRIT-02)
         raise CommandError(f"Command timed out after {timeout}s: {args[0]!r}") from exc
-    if check and result.returncode != 0:
+    except subprocess.CalledProcessError as exc:
         # Limit stderr to 300 chars to avoid leaking verbose system information
-        err = (result.stderr.strip() or "Command failed")[:300]
-        raise CommandError(err)
+        err = (exc.stderr.strip() or "Command failed")[:300] if exc.stderr else "Command failed"
+        raise CommandError(err) from exc
+    except FileNotFoundError as exc:
+        raise CommandError(f"Binary not found: {args[0]!r}") from exc
+        
     return result

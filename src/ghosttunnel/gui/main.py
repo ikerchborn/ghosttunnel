@@ -204,7 +204,7 @@ class IpcWorker(QThread):
         self._running = True
         self._wake = threading.Event()
 
-    def run(self):
+    def run(self) -> None:
         import socket, json
         from ghosttunnel.core.ipc import STATUS_SOCKET_PATH
         while self._running:
@@ -221,7 +221,8 @@ class IpcWorker(QThread):
                         if data.get("event") == "status_change":
                             state = data.get("state", {})
                             self.status_updated.emit(state)
-            except Exception:
+            except Exception as exc:
+                logging.error("IPC status socket error: %s", exc)
                 self._fallback_read()
                 self._wake.wait(timeout=3.0)
                 self._wake.clear()
@@ -238,11 +239,11 @@ class IpcWorker(QThread):
                 if isinstance(data, dict):
                     self.status_updated.emit(data)
                     return
-        except Exception:
-            pass
+        except Exception as exc:
+            logging.error("Fallback read error: %s", exc)
         self.connection_lost.emit()
 
-    def stop(self):
+    def stop(self) -> None:
         self._running = False
         self._wake.set()
         self.quit()
@@ -587,6 +588,7 @@ class MainWindow(QMainWindow):
         super().closeEvent(event)
 
 def main() -> None:
+    """Main GUI entrypoint."""
     app = QApplication(sys.argv)
     app.setApplicationName("GhostTunnel")
     app.setStyle("Fusion")

@@ -32,12 +32,12 @@ class NodeItem(QGraphicsRectItem):
         
         self._align_text()
 
-    def update_text(self, title: str, subtitle: str):
+    def update_text(self, title: str, subtitle: str) -> None:
         self.title_item.setPlainText(title)
         self.subtitle_item.setPlainText(subtitle)
         self._align_text()
         
-    def _align_text(self):
+    def _align_text(self) -> None:
         rect = self.rect()
         t_rect = self.title_item.boundingRect()
         s_rect = self.subtitle_item.boundingRect()
@@ -60,7 +60,7 @@ class EdgeItem(QGraphicsPathItem):
         self.setPen(QPen(QColor("#00ff41"), 2, Qt.PenStyle.SolidLine))
         self.update_path()
 
-    def update_path(self):
+    def update_path(self) -> None:
         start = self.start_node.scenePos()
         end = self.end_node.scenePos()
         
@@ -73,7 +73,7 @@ class EdgeItem(QGraphicsPathItem):
         path.lineTo(QPointF(end_x, end.y()))
         self.setPath(path)
 
-    def set_status(self, secure: bool, leaking: bool = False):
+    def set_status(self, secure: bool, leaking: bool = False) -> None:
         if leaking:
             self.setPen(QPen(QColor("#ff003c"), 2, Qt.PenStyle.DashLine))
         elif secure:
@@ -123,11 +123,11 @@ class NetworkMapWidget(QGraphicsView):
         self.fw_barrier.setPos(-160, -20)
         self.scene.addItem(self.fw_barrier)
 
-    def resizeEvent(self, event):
+    def resizeEvent(self, event) -> None:
         super().resizeEvent(event)
         self.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
 
-    def update_graph(self, status: dict, leak_data: dict = None):
+    def update_graph(self, status: dict, leak_data: dict | None = None) -> None:
         # Update Local Machine
         ifaces = status.get("physical_ifaces", [])
         iface_str = ", ".join(ifaces) if ifaces else "eth0/wlan0"

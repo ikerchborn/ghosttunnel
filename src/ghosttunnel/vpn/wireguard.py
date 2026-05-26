@@ -41,7 +41,7 @@ class WireguardAdapter(VpnAdapter):
 
             # (NEW) Validate handshake via wg show
             try:
-                from ghosttunnel.core.system import run, find_binary
+                from ghosttunnel.core.system import run, find_binary, CommandError
                 wg_bin = find_binary("wg")
                 res = run([wg_bin, "show", name, "latest-handshakes"], check=False)
                 if res.returncode == 0 and res.stdout.strip():
@@ -57,7 +57,7 @@ class WireguardAdapter(VpnAdapter):
                         # We still consider it 'active' to avoid looping between UP and DOWN 
                         # just because the tunnel is idle, but we log the warning for auditing.
                         # (A full implementation could track handshake age).
-            except Exception as e:
+            except (CommandError, FileNotFoundError, OSError) as e:
                 logger.debug("Failed to check wg show for %s: %s", name, e)
 
             # (MED-01) Warn if this interface isn't carrying the default route.
