@@ -1,11 +1,11 @@
 import logging
-import math
+
 
 try:
-    from PyQt6.QtCore import Qt, QPointF, QRectF, QTimer
+    from PyQt6.QtCore import Qt, QPointF
     from PyQt6.QtGui import QBrush, QColor, QPen, QFont, QPainterPath, QPainter
     from PyQt6.QtWidgets import (
-        QGraphicsView, QGraphicsScene, QGraphicsItem,
+        QGraphicsView, QGraphicsScene,
         QGraphicsPathItem, QGraphicsTextItem, QGraphicsRectItem
     )
 except ImportError:
@@ -15,7 +15,7 @@ logger = logging.getLogger(__name__)
 
 class NodeItem(QGraphicsRectItem):
     def __init__(self, title: str, subtitle: str, x: float, y: float, w: float = 180, h: float = 60):
-        super().__init__(-w/2, -h/2, w, h)
+        super().__init__(-w / 2, -h / 2, w, h)
         self.setPos(x, y)
         self.setBrush(QBrush(QColor("#0a0a0a")))
         self.setPen(QPen(QColor("#00ff41"), 2))

@@ -26,12 +26,10 @@ try:
     from PyQt6.QtCore import Qt, QTimer, QThread, pyqtSignal
     from PyQt6.QtWidgets import (
         QApplication,
-        QCheckBox,
         QGridLayout,
         QHBoxLayout,
         QLabel,
         QMainWindow,
-        QMessageBox,
         QPushButton,
         QPlainTextEdit,
         QVBoxLayout,

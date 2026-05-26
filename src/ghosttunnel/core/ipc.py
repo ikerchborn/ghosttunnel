@@ -61,6 +61,7 @@ class IpcServer:
         self._running = False
         for s in (self._ctrl_sock, self._status_sock):
             if s:
+                try: s.close()
                 except OSError as exc: logger.warning("Error closing socket: %s", exc)
         Path(CTRL_SOCKET_PATH).unlink(missing_ok=True)
         Path(STATUS_SOCKET_PATH).unlink(missing_ok=True)

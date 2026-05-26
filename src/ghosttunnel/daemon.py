@@ -85,10 +85,10 @@ class GhostDaemon:
         self._ipc: IpcServer | None = None
         self._last_state: ControllerState | None = None
 
-
     # ------------------------------------------------------------------
     # CRIT-01 — Apply blocking rules immediately before entering the loop
     # ------------------------------------------------------------------
+
     def _apply_boot_rules(self) -> None:
         """
         Ensure the network is locked BEFORE the first snapshot completes.
@@ -304,7 +304,6 @@ class GhostDaemon:
             return {"message": "Configuration saved to /etc/ghosttunnel/config.json"}
         except Exception as e:
             return {"error": str(e)}
-
 
     # ------------------------------------------------------------------
     # PID file (LOW-04)

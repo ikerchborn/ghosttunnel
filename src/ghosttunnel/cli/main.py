@@ -218,8 +218,6 @@ def show_logs() -> None:
     except (subprocess.SubprocessError, OSError) as exc:
         print(f"[!] Failed to tail logs: {exc}")
 
-
-
 def main() -> None:
     """Main entrypoint for the CLI."""
     parser = build_parser()
