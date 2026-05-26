@@ -13,6 +13,7 @@ Fixes applied:
 from __future__ import annotations
 
 import logging
+import nftables
 from dataclasses import dataclass
 
 from .config import Settings
@@ -483,13 +484,19 @@ table inet {table} {{
         else:
             atomic_ruleset = plan.ruleset
 
-        result = run([self.nft, "-f", "-"], input_text=atomic_ruleset, check=False)
-        if result.returncode != 0:
+        nft = nftables.Nftables()
+        nft.set_json_output(True)
+        
+        # Enviar reglas atómicamente a través del módulo nativo
+        rc, output, error = nft.cmd(atomic_ruleset)
+        
+        if rc != 0:
             logger.error(
                 "nft failed to apply %s ruleset (rc=%d): %s",
-                plan.mode, result.returncode, result.stderr.strip()[:300],
+                plan.mode, rc, error[:300],
             )
-            raise RuntimeError(f"nft ruleset apply failed: {result.stderr.strip()[:200]}")
+            raise RuntimeError(f"nft ruleset apply failed: {error[:200]}")
+            
         logger.info("Firewall activated: mode=%s", plan.mode)
 
     def deactivate(self) -> None:
@@ -499,18 +506,18 @@ table inet {table} {{
         require_root()
         if self.external_ks_active:
             # In external KS mode, remove specifically injected chains and sets
-            run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_IN"], check=False)
-            run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_OUT"], check=False)
-            run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_FWD"], check=False)
+            nft = nftables.Nftables()
+            nft.cmd("delete chain inet filter GHOSTTUNNEL_KS_IN")
+            nft.cmd("delete chain inet filter GHOSTTUNNEL_KS_OUT")
+            nft.cmd("delete chain inet filter GHOSTTUNNEL_KS_FWD")
             for s in ("lan_ipv4", "bootstrap_dns_v4", "lan_ipv6", "bootstrap_dns_v6", "vpn_endpoints_v4", "vpn_endpoints_v6"):
-                run([self.nft, "delete", "set", "inet", "filter", s], check=False)
+                nft.cmd(f"delete set inet filter {s}")
         else:
-            # To avoid using raw 'delete table' commands in Python subprocess calls,
-            # we send the deletion command as an atomic transaction via stdin.
-            # We use 'destroy table' instead of 'delete table' to avoid GT-002 flags.
+            # Atomic transaction via native library
             table = self.settings.table_name
             teardown = f"table inet {table}\ndestroy table inet {table}"
-            run([self.nft, "-f", "-"], input_text=teardown, check=False)
+            nft = nftables.Nftables()
+            nft.cmd(teardown)
 
     def is_active(self) -> bool:
         """
@@ -520,12 +527,11 @@ table inet {table} {{
             True if the table exists/is active, False otherwise.
         """
         try:
-            result = run(
-                [self.nft, "list", "table", "inet", self.settings.table_name],
-                check=False,
-            )
-        except (CommandError, OSError) as exc:
+            nft = nftables.Nftables()
+            nft.set_json_output(True)
+            rc, output, error = nft.cmd(f"list table inet {self.settings.table_name}")
+            return rc == 0
+        except Exception as exc:
             logger.debug("Failed checking firewall active status: %s", exc)
             return False
-        return result.returncode == 0
 

@@ -7,7 +7,7 @@ name = "ghosttunnel"
 version = "1.0.0"
 description = "Advanced Linux VPN Kill Switch & OPSEC Infrastructure."
 readme = "README.md"
-requires-python = ">=3.12"
+requires-python = ">=3.14"
 license = { text = "MIT" }
 authors = [
   { name = "Resan" }
@@ -19,7 +19,7 @@ classifiers = [
   "Intended Audience :: System Administrators",
   "License :: OSI Approved :: MIT License",
   "Operating System :: POSIX :: Linux",
-  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.14",
   "Topic :: System :: Networking :: Firewalls",
   "Topic :: Security",
 ]
@@ -54,7 +54,7 @@ addopts   = "-v --tb=short"
 packages = ["src/ghosttunnel"]
 
 [tool.pyrefly]
-python_version = "3.12"
+python_version = "3.14"
 strict = true
 
 [[tool.pyrefly.overrides]]
