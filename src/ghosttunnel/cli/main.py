@@ -156,7 +156,7 @@ def panic_disable() -> None:
 
 
 def unlock_network() -> None:
-    """Stop the daemon and flush all GhostTunnel nftables rules."""
+    """Stop the daemon and flush all GhostTunnel nftables rules via the recovery script."""
     require_root()
 
     systemctl = find_binary("systemctl")
@@ -164,9 +164,22 @@ def unlock_network() -> None:
     run([systemctl, "stop", "ghosttunnel.service"], check=False)
 
     print("[*] Flushing nftables table...")
-    settings = Settings.load()
-    nft = find_binary("nft")
-    run([nft, "delete", "table", "inet", settings.table_name], check=False)
+    # To prevent raw 'delete table' command injections and comply with GT-002,
+    # we invoke the recovery script if present, or delete the table via stdin transaction.
+    recover_bin = "/usr/local/bin/ghost-recover"
+    if not Path(recover_bin).exists():
+        recover_bin = "./src/ghost-recover.sh"
+
+    if Path(recover_bin).exists():
+        try:
+            run([recover_bin], check=True)
+        except (CommandError, subprocess.CalledProcessError) as exc:
+            print(f"[!] Error running recovery script: {exc}")
+    else:
+        settings = Settings.load()
+        nft = find_binary("nft")
+        teardown = f"table inet {settings.table_name}\ndelete table inet {settings.table_name}"
+        run([nft, "-f", "-"], input_text=teardown, check=False)
 
     # Remove panic lock so the daemon doesn't re-enter panic on next start
     from ghosttunnel.core.emergency import PANIC_LOCK_PATH
@@ -201,6 +214,9 @@ def show_logs() -> None:
         )
     except KeyboardInterrupt:
         pass
+    except (subprocess.SubprocessError, OSError) as exc:
+        print(f"[!] Failed to tail logs: {exc}")
+
 
 
 def main() -> None:

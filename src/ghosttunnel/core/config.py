@@ -202,18 +202,30 @@ class Settings:
         return value   # Unknown fields handled upstream
 
     def save(self, path: str = DEFAULT_CONFIG_PATH) -> None:
-        """Atomically write config with restricted permissions (0o600)."""
+        """
+        Atomically write config with restricted permissions (0o600).
+
+        Args:
+            path: Target file path to write to.
+        """
         try:
             dest = Path(path)
             dest.parent.mkdir(parents=True, exist_ok=True, mode=0o700)
             data = asdict(self)
-            content = json.dumps(data, indent=4).encode("utf-8")
-            fd, tmp = tempfile.mkstemp(dir=str(dest.parent), prefix=".cfg-", suffix=".tmp")
-            try:
-                os.write(fd, content)
-            finally:
-                os.close(fd)
-            os.chmod(tmp, 0o600)   # Root read/write only — config may contain VPN endpoints
-            os.replace(tmp, str(dest))
+            content = json.dumps(data, indent=4)
+            # Use NamedTemporaryFile with a context manager for safe descriptor cleanup
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=str(dest.parent),
+                prefix=".cfg-",
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp_file:
+                tmp_file.write(content)
+                tmp_path = tmp_file.name
+            os.chmod(tmp_path, 0o600)   # Root read/write only — config may contain VPN endpoints
+            os.replace(tmp_path, str(dest))
         except Exception as e:
             logger.error("Failed to save config to %s: %s", path, e)
+

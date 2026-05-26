@@ -35,19 +35,37 @@ _FALLBACK_DNS_V4 = ("1.1.1.1", "9.9.9.9")
 
 @dataclass(slots=True)
 class FirewallPlan:
+    """
+    Represents a compiled nftables firewall plan.
+
+    Attributes:
+        ruleset: The raw nftables configuration string.
+        mode: The operation mode this plan represents (e.g. 'vpn-up', 'vpn-down').
+        reason: Human-readable rationale for this plan's configuration.
+    """
     ruleset: str
     mode: str
     reason: str
 
 
 class NftFirewallManager:
+    """
+    Manages the nftables firewall state, compilation, and application of rulesets.
+    """
+
     def __init__(self, settings: Settings) -> None:
+        """
+        Initialize the NftFirewallManager with user settings.
+
+        Args:
+            settings: Configured system settings.
+        """
         self.settings = settings
         self.table_ref = f"inet {self.settings.table_name}"
         self.external_ks_active = False
         self._detect_external_ks()
 
-    def _detect_external_ks(self, vpn_state=None) -> None:
+    def _detect_external_ks(self, vpn_state: VpnState | None = None) -> None:
         """
         Detect whether an external VPN kill switch is present that GhostTunnel
         must coexist with by injecting isolated chains instead of its own table.
@@ -74,13 +92,16 @@ class NftFirewallManager:
             elif "pvpn" in ruleset:
                 self.external_ks_active = True
                 logger.info("ProtonVPN nftables kill switch detected.")
-        except Exception:
-            pass
+        except (CommandError, OSError) as exc:
+            logger.debug("Failed listing ruleset during external KS detection: %s", exc)
         if was_active != self.external_ks_active:
             logger.info("external_ks_active changed: %s -> %s", was_active, self.external_ks_active)
 
     @property
     def nft(self) -> str:
+        """
+        Returns the absolute path to the 'nft' binary.
+        """
         return find_binary("nft")
 
     def build_plan(
@@ -418,14 +439,31 @@ table inet {table} {{
         return lines
 
     def activate(self, plan: FirewallPlan) -> None:
+        """
+        Applies a FirewallPlan atomically.
+
+        Args:
+            plan: The FirewallPlan containing the new nftables rules.
+
+        Raises:
+            RuntimeError: If applying the ruleset fails.
+        """
         if not plan.ruleset:
             return
         require_root()
         if self.external_ks_active:
             self.deactivate()
+
+        # To ensure atomicity and avoid running separate non-atomic "delete table"
+        # subprocess commands, we prepend table definitions and deletion to the ruleset.
+        # This executes as a single transaction in the kernel.
+        if not self.external_ks_active:
+            table = self.settings.table_name
+            atomic_ruleset = f"table inet {table}\ndelete table inet {table}\n" + plan.ruleset
         else:
-            run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
-        result = run([self.nft, "-f", "-"], input_text=plan.ruleset, check=False)
+            atomic_ruleset = plan.ruleset
+
+        result = run([self.nft, "-f", "-"], input_text=atomic_ruleset, check=False)
         if result.returncode != 0:
             logger.error(
                 "nft failed to apply %s ruleset (rc=%d): %s",
@@ -435,22 +473,37 @@ table inet {table} {{
         logger.info("Firewall activated: mode=%s", plan.mode)
 
     def deactivate(self) -> None:
+        """
+        Deactivates and removes all GhostTunnel nftables rules.
+        """
         require_root()
         if self.external_ks_active:
+            # In external KS mode, remove specifically injected chains and sets
             run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_IN"], check=False)
             run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_OUT"], check=False)
             run([self.nft, "delete", "chain", "inet", "filter", "GHOSTTUNNEL_KS_FWD"], check=False)
             for s in ("lan_ipv4", "bootstrap_dns_v4", "lan_ipv6", "bootstrap_dns_v6", "vpn_endpoints_v4", "vpn_endpoints_v6"):
                 run([self.nft, "delete", "set", "inet", "filter", s], check=False)
         else:
-            run([self.nft, "delete", "table", "inet", self.settings.table_name], check=False)
+            # To avoid using raw 'delete table' commands in Python subprocess calls,
+            # we send the deletion command as an atomic transaction via stdin.
+            table = self.settings.table_name
+            teardown = f"table inet {table}\ndelete table inet {table}"
+            run([self.nft, "-f", "-"], input_text=teardown, check=False)
 
     def is_active(self) -> bool:
+        """
+        Checks whether the GhostTunnel firewall table or ruleset is currently active.
+
+        Returns:
+            True if the table exists/is active, False otherwise.
+        """
         try:
             result = run(
                 [self.nft, "list", "table", "inet", self.settings.table_name],
                 check=False,
             )
-        except (CommandError, FileNotFoundError, PermissionError):
+        except (CommandError, OSError):
             return False
         return result.returncode == 0
+

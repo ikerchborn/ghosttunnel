@@ -81,6 +81,10 @@ class IpcServer:
                 except OSError: pass
 
     def _serve_status(self) -> None:
+        """
+        Accepts connections on the status Unix Domain Socket, performs GID verification,
+        sets a socket timeout, and registers clients for status broadcasts.
+        """
         while self._running and self._status_sock:
             try:
                 conn, _ = self._status_sock.accept()
@@ -88,10 +92,31 @@ class IpcServer:
                 continue
             except OSError:
                 break
+            
+            try:
+                conn.settimeout(1.0)
+                if not self._check_peer_gid(conn):
+                    try:
+                        conn.close()
+                    except OSError:
+                        pass
+                    continue
+            except Exception as exc:
+                logger.error("Error configuring status socket client: %s", exc)
+                try:
+                    conn.close()
+                except OSError:
+                    pass
+                continue
+
             with self._status_lock:
                 self._status_clients.append(conn)
 
     def _serve_ctrl(self) -> None:
+        """
+        Accepts connections on the control Unix Domain Socket and spawns a thread to
+        handle each command.
+        """
         while self._running and self._ctrl_sock:
             try:
                 conn, _ = self._ctrl_sock.accept()
@@ -103,6 +128,10 @@ class IpcServer:
 
     @staticmethod
     def _check_peer_gid(conn: socket.socket) -> bool:
+        """
+        Retrieves peer GID credentials from Unix Domain Socket credentials and verifies
+        if the client belongs to the authorized 'ghosttunnel' group or is root.
+        """
         try:
             import grp
             cred = conn.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, struct.calcsize("3i"))  # type: ignore
@@ -111,10 +140,17 @@ class IpcServer:
                 return True
             gt_gid = grp.getgrnam("ghosttunnel").gr_gid  # type: ignore
             return peer_gid == gt_gid
-        except Exception:
+        except Exception as exc:
+            logger.debug("Failed checking peer credentials: %s", exc)
             return False
 
     def _handle_ctrl(self, conn: socket.socket) -> None:
+        """
+        Processes client commands on the control socket connection.
+
+        Args:
+            conn: The client socket connection.
+        """
         try:
             with conn:
                 conn.settimeout(_CLIENT_TIMEOUT)
@@ -127,6 +163,9 @@ class IpcServer:
                     return
                 try:
                     msg = json.loads(raw)
+                    if not isinstance(msg, dict):
+                        self._send(conn, {"ok": False, "error": "invalid JSON format, dict expected"})
+                        return
                 except json.JSONDecodeError:
                     self._send(conn, {"ok": False, "error": "invalid JSON"})
                     return
@@ -142,9 +181,10 @@ class IpcServer:
                     result = handler(payload)
                     self._send(conn, {"ok": True, **(result or {})})
                 except Exception as exc:
+                    logger.error("IPC command execution failed: %s", exc)
                     self._send(conn, {"ok": False, "error": "internal handler error"})
-        except Exception:
-            pass
+        except Exception as exc:
+            logger.error("IPC connection error: %s", exc)
 
     @staticmethod
     def _recv_line(conn: socket.socket) -> str | None:

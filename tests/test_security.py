@@ -642,3 +642,93 @@ class TestVpnMonitor:
         snap = NetworkSnapshot()
         state = monitor.determine_state(snap)
         assert state.active is False
+
+
+class TestAnomalyDetector:
+    def test_anomaly_detection_no_attribute_errors(self) -> None:
+        """Verify AnomalyDetector resolves links and gateway checks against correct NetworkSnapshot attributes without throwing AttributeError."""
+        from ghosttunnel.core.anomaly import AnomalyDetector
+        from ghosttunnel.core.models import InterfaceInfo, NetworkSnapshot
+
+        detector = AnomalyDetector()
+        
+        # Test case 1: VPN active, default gateway matches VPN
+        snap1 = NetworkSnapshot(
+            interfaces={"wg0": InterfaceInfo(name="wg0", state="UP")},
+            default_route_iface="wg0"
+        )
+        alerts1 = detector.analyze(snap1, "vpn-up", "wireguard", "wg0")
+        assert len(alerts1) == 0
+
+        # Test case 2: Routing mismatch (default route on eth0 instead of wg0)
+        snap2 = NetworkSnapshot(
+            interfaces={
+                "wg0": InterfaceInfo(name="wg0", state="UP"),
+                "eth0": InterfaceInfo(name="eth0", state="UP")
+            },
+            default_route_iface="eth0"
+        )
+        alerts2 = detector.analyze(snap2, "vpn-up", "wireguard", "wg0")
+        assert any("Routing anomaly" in a for a in alerts2)
+
+        # Test case 3: Interface vanished
+        snap3 = NetworkSnapshot(
+            interfaces={"eth0": InterfaceInfo(name="eth0", state="UP")},
+            default_route_iface="eth0"
+        )
+        alerts3 = detector.analyze(snap3, "vpn-up", "wireguard", "wg0")
+        assert any("Interface anomaly" in a for a in alerts3)
+
+        # Test case 4: Panic anomaly (default gateway exists during panic)
+        snap4 = NetworkSnapshot(
+            interfaces={"eth0": InterfaceInfo(name="eth0", state="UP")},
+            default_route_iface="eth0"
+        )
+        alerts4 = detector.analyze(snap4, "panic", "wireguard", "wg0")
+        assert any("Panic anomaly" in a for a in alerts4)
+
+
+class TestConfigValidation:
+    def test_save_config_ipc_validation_types(self, monkeypatch) -> None:
+        """Verify daemon save config IPC validations properly sanitize and validate settings parameter types."""
+        import ghosttunnel.core.system as system_mod
+        import ghosttunnel.core.leak_detector as ld_mod
+        import ghosttunnel.core.firewall as fw_mod
+
+        monkeypatch.setattr(system_mod, "find_binary", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(ld_mod, "find_binary", lambda name: f"/usr/bin/{name}")
+        monkeypatch.setattr(fw_mod, "find_binary", lambda name: f"/usr/bin/{name}")
+        
+        from ghosttunnel.daemon import GhostDaemon
+        from ghosttunnel.core.config import Settings
+        
+        s = Settings()
+        daemon = GhostDaemon(s)
+        
+        # Inject bad payload with invalid types
+        bad_payload = {
+            "kill_switch": "not-a-bool",  # invalid bool
+            "monitor_poll_seconds": "not-a-float",  # invalid float
+            "table_name": 12345,  # invalid str
+            "allow_lan": True  # valid bool
+        }
+        
+        # Run IPC save config
+        # Mock save() to avoid filesystem writes during test
+        monkeypatch.setattr(Settings, "save", lambda self: None)
+        try:
+            res = daemon._ipc_save_config(bad_payload)
+            assert "Configuration saved" in res.get("message", "")
+            # Valid type was updated
+            assert s.allow_lan is True
+            # Invalid types were dropped/ignored
+            assert isinstance(s.kill_switch, bool)
+            assert s.kill_switch is True  # remained default
+            assert isinstance(s.table_name, str)
+            assert s.table_name == "ghosttunnel"  # remained default
+        except Exception as e:
+            pytest.fail(f"Save config failed: {e}")
+
+
+
+

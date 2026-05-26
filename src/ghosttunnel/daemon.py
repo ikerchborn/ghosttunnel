@@ -60,7 +60,18 @@ def _ensure_runtime_dir() -> None:
 
 
 class GhostDaemon:
-    def __init__(self, settings: Settings):
+    """
+    Main GhostTunnel daemon logic that handles synchronization cycles, VPN rotation,
+    leak detection, and IPC message routing.
+    """
+
+    def __init__(self, settings: Settings) -> None:
+        """
+        Initialize the GhostDaemon with configuration settings.
+
+        Args:
+            settings: The system configuration settings.
+        """
         self.settings = settings
         self.leak_detector = LeakDetector(settings)
         self.vpn_monitor = VpnMonitor(settings)
@@ -73,6 +84,7 @@ class GhostDaemon:
         self._last_signature: str | None = None
         self._ipc: IpcServer | None = None
         self._last_state: ControllerState | None = None
+
 
     # ------------------------------------------------------------------
     # CRIT-01 — Apply blocking rules immediately before entering the loop
@@ -239,24 +251,36 @@ class GhostDaemon:
     # IPC handlers (CRIT-04)
     # ------------------------------------------------------------------
     def _ipc_panic(self, payload: dict) -> dict:
+        """
+        Triggers emergency panic lock mode.
+        """
         self.trigger_panic()
         return {"mode": "panic", "message": "Panic mode engaged."}
 
     def _ipc_panic_disable(self, payload: dict) -> dict:
+        """
+        Disables emergency panic lock mode.
+        """
         self.emergency.disable_panic()
         self._last_signature = None  # force re-evaluation
         self.sync()  # Apply new rules immediately (matches _ipc_panic behavior)
         return {"message": "Panic mode disabled. Firewall rules updated."}
 
     def _ipc_status(self, payload: dict) -> dict:
+        """
+        Returns the last synchronized state.
+        """
         if self._last_state:
             from dataclasses import asdict
             return asdict(self._last_state)
         return {"mode": "unknown", "message": "No sync has completed yet."}
 
     def _ipc_unlock_network(self, payload: dict) -> dict:
+        """
+        Asynchronously deactivates the firewall and stops the daemon.
+        """
         import threading
-        def _stop():
+        def _stop() -> None:
             import time
             time.sleep(0.5)
             from ghosttunnel.core.emergency import PANIC_LOCK_PATH
@@ -267,14 +291,24 @@ class GhostDaemon:
         return {"message": "Network unlocked. Daemon stopping."}
 
     def _ipc_save_config(self, payload: dict) -> dict:
+        """
+        Validates value types and saves config payload.
+        """
+        if not isinstance(payload, dict):
+            return {"error": "Invalid payload format"}
         for k, v in payload.items():
             if hasattr(self.settings, k):
-                setattr(self.settings, k, v)
+                # Validate the type using Settings type specifications
+                validated = self.settings._validate_field(k, v)
+                if validated is not None:
+                    setattr(self.settings, k, validated)
         try:
+            self.settings._sanitize_network_fields()
             self.settings.save()
             return {"message": "Configuration saved to /etc/ghosttunnel/config.json"}
         except Exception as e:
             return {"error": str(e)}
+
 
     # ------------------------------------------------------------------
     # PID file (LOW-04)
@@ -319,7 +353,8 @@ class GhostDaemon:
         })
         self._ipc.start()
 
-        def handle_signal(signum, frame):
+        from typing import Any
+        def handle_signal(signum: int, frame: Any) -> None:
             logger.info("Received termination signal (sig=%d).", signum)
             self._running = False
 
@@ -349,30 +384,42 @@ class GhostDaemon:
     # Status file (HIGH-01: permissions 0o640)
     # ------------------------------------------------------------------
     def _write_status_file(self, state: ControllerState) -> None:
+        """
+        Atomically write current ControllerState to the status file.
+
+        Args:
+            state: The current ControllerState.
+        """
         path = Path(self.settings.status_path)
         # BUG-DAEMON-05: Create dir with 0o755 so world can traverse to read status
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
-            os.chmod(str(path.parent), 0o755)
+            path.parent.chmod(0o755)
         except OSError:
             pass
 
         content = json.dumps(asdict(state), indent=2)
         try:
-            fd, tmp = tempfile.mkstemp(
-                dir=str(path.parent), prefix=".status-", suffix=".tmp"
-            )
-            try:
-                os.write(fd, content.encode("utf-8"))
-            finally:
-                os.close(fd)
-            os.chmod(tmp, 0o644)   # BUG-DAEMON-06: allow non-root to read status
-            os.replace(tmp, str(path))
+            with tempfile.NamedTemporaryFile(
+                mode="w",
+                dir=str(path.parent),
+                prefix=".status-",
+                suffix=".tmp",
+                delete=False,
+                encoding="utf-8",
+            ) as tmp_file:
+                tmp_file.write(content)
+                tmp_path = tmp_file.name
+            os.chmod(tmp_path, 0o644)   # BUG-DAEMON-06: allow non-root to read status
+            os.replace(tmp_path, str(path))
         except OSError as exc:
             logger.warning("Failed to write status file atomically: %s", exc)
 
 
-def main():
+def main() -> None:
+    """
+    Main entry point for running the daemon process.
+    """
     import ghosttunnel.core.logger as log_setup
     # BUG-DAEMON-02: Configure the ROOT "ghosttunnel" logger so ALL child loggers
     # (ghosttunnel.daemon, ghosttunnel.core.*, ghosttunnel.vpn.*) inherit the handler.
@@ -390,3 +437,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
