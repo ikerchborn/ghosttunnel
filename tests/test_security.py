@@ -735,6 +735,15 @@ class TestCorePublicMethods:
     def test_firewall_methods(self, monkeypatch):
         import ghosttunnel.core.firewall as fw_mod
         monkeypatch.setattr(fw_mod, "find_binary", lambda x: "/bin/nft")
+        
+        class MockNftables:
+            def set_json_output(self, val): pass
+            def cmd(self, val): return 0, "", ""
+            
+        class MockNftablesModule:
+            Nftables = MockNftables
+            
+        monkeypatch.setattr(fw_mod, "nftables", MockNftablesModule)
         monkeypatch.setattr(fw_mod, "run", lambda *a, **kw: type("Res", (), {"returncode": 0, "stdout": "", "stderr": ""}))
         from ghosttunnel.core.firewall import NftFirewallManager, FirewallPlan
         from ghosttunnel.core.config import Settings
