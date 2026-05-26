@@ -13,7 +13,10 @@ Fixes applied:
 from __future__ import annotations
 
 import logging
-import nftables
+try:
+    import nftables
+except ImportError:
+    nftables = None
 from dataclasses import dataclass
 
 from .config import Settings
