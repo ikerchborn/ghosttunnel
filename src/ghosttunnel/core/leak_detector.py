@@ -5,7 +5,7 @@ from pathlib import Path
 
 from .config import Settings
 from .models import InterfaceInfo, NetworkSnapshot
-from .system import run, find_binary
+from .system import CommandError, find_binary, run
 from .dns_protection import resolve_hosts, get_dns_servers
 
 logger = logging.getLogger(__name__)

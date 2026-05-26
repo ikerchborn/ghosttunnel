@@ -11,11 +11,12 @@ Fixes applied:
 import argparse
 import json
 import logging
+import subprocess
 import sys
 from pathlib import Path
 
 from ghosttunnel.core.config import Settings
-from ghosttunnel.core.system import require_root, find_binary, run
+from ghosttunnel.core.system import CommandError, find_binary, require_root, run
 from ghosttunnel.core.ipc import send_command
 
 logger = logging.getLogger(__name__)
